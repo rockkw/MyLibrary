@@ -1,0 +1,9 @@
+# Nightly scan + parse + classify + plan. Never applies; renames need your review.
+[Unit]
+Description=MyLibrary pipeline (no renames)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/MyLibrary
+Environment=MYLIBRARY_CONFIG=%h/MyLibrary/config.ini
+ExecStart=/usr/bin/python3 %h/MyLibrary/mylib.py pipeline

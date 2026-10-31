@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>📚 MyLibrary</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div id="navbar">
+  <h1>📚 MyLibrary</h1>
+  <a class="nav-link active" data-page="review" href="#review">Review</a>
+  <a class="nav-link" data-page="runs" href="#runs">Runs</a>
+  <a class="nav-link" data-page="dupes" href="#dupes">Duplicates</a>
+  <div id="stats-bar"></div>
+</div>
+
+<!-- ── Review: three panes ── -->
+<div id="page-review" class="page active">
+  <div class="layout">
+    <aside id="sidebar">
+      <div class="side-section">
+        <div class="filter-label">Status</div>
+        <div id="status-list"></div>
+      </div>
+      <div class="side-section">
+        <div class="filter-label">Drives</div>
+        <div id="root-list"></div>
+      </div>
+      <div class="side-section">
+        <div class="filter-label">Pipeline</div>
+        <button class="job-btn" data-job="scan">Scan drives<code>mylib scan</code></button>
+        <button class="job-btn" data-job="parse">Parse names<code>mylib parse</code></button>
+        <button class="job-btn" data-job="classify">Ask local LLM<code>mylib classify</code></button>
+        <button class="job-btn" data-job="plan">Build plan<code>mylib plan</code></button>
+        <button class="job-btn" data-job="pipeline">Run all four<code>mylib pipeline</code></button>
+      </div>
+      <div class="side-section">
+        <button id="apply-btn">Apply approved…</button>
+        <div class="side-note">Dry run first. Files are renamed, never deleted.</div>
+      </div>
+    </aside>
+
+    <main id="list-pane">
+      <div class="toolbar">
+        <label class="chk"><input type="checkbox" id="select-all"></label>
+        <input id="q" placeholder="Search file or title…  ( / )">
+        <button class="act approve" data-act="approve">Approve</button>
+        <button class="act skip" data-act="skip">Skip</button>
+        <button class="act" data-act="reset">Reset</button>
+      </div>
+      <div class="keys">j/k move · a approve · s skip · e edit · x select</div>
+      <div id="list"></div>
+    </main>
+
+    <section id="detail-pane"><p class="empty">Select a file to review.</p></section>
+  </div>
+</div>
+
+<div id="page-runs" class="page"><div class="pad"><div id="runs"></div></div></div>
+<div id="page-dupes" class="page"><div class="pad">
+  <p class="side-note">Report only. MyLibrary never removes duplicates; decide and delete yourself.</p>
+  <div id="dupes"></div></div></div>
+
+<!-- ── Job bar ── -->
+<div id="jobbar">
+  <span id="job-state" class="pill idle">idle</span>
+  <code id="job-cli"></code>
+  <span id="job-last"></span>
+  <button id="job-toggle">log ▴</button>
+  <pre id="job-log"></pre>
+</div>
+
+<!-- ── Apply dialog ── -->
+<div id="apply-overlay" class="overlay">
+  <div class="dialog">
+    <h2>Apply plan <span id="apply-plan"></span></h2>
+    <p class="side-note">Step 1 is a dry run. Nothing changes until you press Execute.
+      Every file gets a hard-link safety copy first, and the run is verified afterward.</p>
+    <pre id="apply-log"></pre>
+    <div class="btns">
+      <button class="cancel" id="apply-cancel">Close</button>
+      <button class="confirm" id="apply-exec" disabled>Execute</button>
+    </div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

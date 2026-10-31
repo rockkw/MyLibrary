@@ -1,0 +1,44 @@
+# MyLibrary configuration — copy to config.ini and edit.
+# Values support ${VAR} and ${VAR:-default} expansion (same as MyMagnet).
+#   export MYLIBRARY_CONFIG=/path/to/config.ini   to use a different file
+
+[paths]
+db_file = ${MYLIBRARY_DB:-${HOME}/.mylibrary/inventory.db}
+log_dir = ${MYLIBRARY_LOGS:-${HOME}/.mylibrary/logs}
+
+[library]
+; One root per line. Each root is organized in place: files move into
+; <root>/<movies_dir>/... on the SAME drive (cross-drive moves are refused).
+roots =
+    /mnt/ssd1
+    /mnt/ssd2
+    /mnt/ssd3
+movies_dir = Movies
+; Jellyfin naming: Movies/Title (Year)/Title (Year) - 1080p.mkv
+layout = {title} ({year})/{title} ({year}){quality}
+video_extensions = mkv,mp4,m4v,avi,mov,wmv,mpg,mpeg,ts,m2ts,webm,iso
+; Moved alongside the video when they share its file name stem
+sidecar_extensions = srt,sub,idx,ass,ssa,vtt,nfo
+ignore_words = sample,trailer
+min_duration_minutes = 40
+
+[ollama]
+enabled = true
+url = http://localhost:11434
+model = mistral
+timeout = 120
+
+; Optional offline IMDb check: download title.basics.tsv.gz from
+; https://datasets.imdbws.com/ once, then run  mylib imdb-import title.basics.tsv.gz
+; (stored in the same inventory.db; lookups are fully offline afterward)
+
+[thresholds]
+; Proposals at or above this confidence are auto-approved.
+auto_approve = 0.90
+; LLM answers are capped here, so they always need review unless IMDb confirms them.
+llm_max_confidence = 0.85
+
+[server]
+; Keep on localhost, or set to the Tailscale IP. Never 0.0.0.0.
+host = 127.0.0.1
+port = 5051

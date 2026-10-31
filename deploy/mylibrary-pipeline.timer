@@ -1,0 +1,9 @@
+[Unit]
+Description=Run MyLibrary pipeline nightly
+
+[Timer]
+OnCalendar=*-*-* 03:17
+Persistent=true
+
+[Install]
+WantedBy=timers.target

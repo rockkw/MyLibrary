@@ -1,0 +1,9 @@
+.DS_Store
+__pycache__/
+*.pyc
+.pytest_cache/
+config.ini
+*.db
+*.db-wal
+*.db-shm
+*.lock
