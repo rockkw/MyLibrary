@@ -9,10 +9,8 @@ from test_pipeline import run_to_plan
 
 @pytest.fixture
 def client(lib):
-    sys.modules.pop("web.app", None)
-    sys.path.insert(0, str(lib["ini"].parent))
-    import web.app as webapp
-    importlib.reload(webapp)
+    import mylibrary.web.app as webapp
+    importlib.reload(webapp)  # re-read config for this test's library
     run_to_plan(lib)
     webapp.app.testing = True
     return webapp.app.test_client()

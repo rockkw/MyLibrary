@@ -48,7 +48,7 @@ def test_only_safefs_renames():
 
 
 def test_web_never_imports_filesystem_modules():
-    tree = ast.parse((ROOT / "web" / "app.py").read_text())
+    tree = ast.parse((ROOT / "src" / "mylibrary" / "web" / "app.py").read_text())
     names = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
@@ -60,6 +60,6 @@ def test_web_never_imports_filesystem_modules():
 
 
 def test_safe_move_has_no_fallback():
-    src = (ROOT / "mylibrary" / "safefs.py").read_text()
+    src = (ROOT / "src" / "mylibrary" / "safefs.py").read_text()
     assert "RENAME_NOREPLACE" in src and "RENAME_EXCL" in src
     assert "except" not in src.split("def safe_move", 1)[1].split("def snapshot_link")[0]

@@ -1,13 +1,13 @@
-# Copy to ~/.config/systemd/user/ then:
+# Copy (with the .timer) to ~/.config/systemd/user/ then:
 #   systemctl --user daemon-reload && systemctl --user enable --now mylibrary-web
 [Unit]
 Description=MyLibrary review UI (localhost:5051)
 After=network.target
 
 [Service]
-WorkingDirectory=%h/MyLibrary
-Environment=MYLIBRARY_CONFIG=%h/MyLibrary/config.ini
-ExecStart=/usr/bin/python3 %h/MyLibrary/web/app.py
+WorkingDirectory=%h/src/MyLibrary
+Environment=MYLIBRARY_CONFIG=%h/src/MyLibrary/config.ini
+ExecStart=%h/.local/bin/mylib serve
 Restart=on-failure
 
 [Install]

@@ -7,3 +7,4 @@ config.ini
 *.db-wal
 *.db-shm
 *.lock
+*.egg-info/

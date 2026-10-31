@@ -64,28 +64,30 @@ still points to it). MyLibrary never does this for you.
 
 ```bash
 sudo apt install ffmpeg            # provides ffprobe
-git clone https://github.com/rockkw/MyLibrary.git && cd MyLibrary
-pip3 install -r requirements.txt --break-system-packages
+git clone https://github.com/rockkw/MyLibrary.git ~/src/MyLibrary && cd ~/src/MyLibrary
+pip3 install -e . --break-system-packages   # installs the `mylib` command
 cp config.ini.sample config.ini    # set [library] roots to your SSD mounts
 ollama pull mistral                # Ollama >= 0.5 (JSON-schema output)
 ```
 
 Optional offline IMDb verification: download `title.basics.tsv.gz` once from
-<https://datasets.imdbws.com/>, then `python3 mylib.py imdb-import title.basics.tsv.gz`.
+<https://datasets.imdbws.com/>, then `mylib imdb-import title.basics.tsv.gz`.
 
 ## Use
 
 ```bash
-python3 mylib.py pipeline             # scan + parse + classify + plan
-python3 mylib.py review               # list items needing review / conflicts
-python3 mylib.py edit 42 --title "Pengabdi Setan" --year 2017
-python3 mylib.py apply                # dry run
-python3 mylib.py apply --execute      # rename + verify
-python3 mylib.py runs
-python3 mylib.py undo --run 3         # dry run; add --execute
-python3 mylib.py dupes
-python3 web/app.py                    # UI on http://127.0.0.1:5051
+mylib pipeline             # scan + parse + classify + plan
+mylib review               # list items needing review / conflicts
+mylib edit 42 --title "Pengabdi Setan" --year 2017
+mylib apply                # dry run
+mylib apply --execute      # rename + verify
+mylib runs
+mylib undo --run 3         # dry run; add --execute
+mylib dupes
+mylib serve                # UI on http://127.0.0.1:5051
 ```
+
+Without installing, `python3 mylib.py <command>` does the same from the repo.
 
 Add `--json` to any command for machine-readable output (logs go to stderr).
 
@@ -103,11 +105,13 @@ See `config.ini.sample`. Values support `${VAR:-default}` like MyMagnet;
 ## Layout
 
 ```
-mylib.py              CLI
-mylibrary/            core: config, db, scan, parse, classify, imdb, plan, review, apply, safefs, dupes
-web/                  Flask UI (app.py, templates/, static/)
+src/mylibrary/        core: config, db, scan, parse, classify, imdb, plan, review, apply, safefs, dupes
+src/mylibrary/cli.py  the `mylib` CLI
+src/mylibrary/web/    Flask UI (app.py, templates/, static/)
 tests/                pytest, including the no-delete guard
-deploy/               systemd units
+infra/compose/        systemd units (UI service, nightly pipeline timer)
+.github/workflows/    CI: runs the tests on every push
+mylib.py              run-from-repo shim
 ```
 
 Project docs, diagrams and backlog live in the MyLibrary project folder on
@@ -116,6 +120,6 @@ Google Drive (Archetype layout).
 ## Tests
 
 ```bash
-pip3 install pytest --break-system-packages
-python3 -m pytest -q
+pip3 install -e ".[test]" --break-system-packages
+pytest -q
 ```

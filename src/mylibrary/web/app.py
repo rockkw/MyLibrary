@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """MyLibrary review UI (Flask), styled after MyMagnet.
 
 This app never touches media files. It:
@@ -20,15 +19,15 @@ from pathlib import Path
 
 from flask import Flask, abort, jsonify, render_template, request
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+from mylibrary import config, db, dupes, plan, review
 
-from mylibrary import config, db, dupes, plan, review  # noqa: E402
-
+SRC = Path(__file__).resolve().parents[2]          # .../src
 app = Flask(__name__)
 CFG = config.load()
-MYLIB = [sys.executable, str(ROOT / "mylib.py")] + (
+MYLIB = [sys.executable, "-m", "mylibrary.cli"] + (
     ["--config", str(CFG.source)] if CFG.source else [])
+JOB_ENV = {**os.environ,
+           "PYTHONPATH": os.pathsep.join(filter(None, [str(SRC), os.environ.get("PYTHONPATH")]))}
 
 # name -> (argv builder, description). Only these can be launched from the UI.
 JOBS = {
@@ -62,7 +61,7 @@ def con():
 
 def _run_job(job):
     proc = subprocess.Popen(job["argv"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, bufsize=1, cwd=ROOT)
+                            text=True, bufsize=1, env=JOB_ENV)
     for line in proc.stdout:
         job["log"].append(line.rstrip("\n"))
     job["rc"] = proc.wait()
@@ -177,7 +176,13 @@ def api_jobs():
                     for j in sorted(_jobs.values(), key=lambda j: -j["id"])[:20]])
 
 
-if __name__ == "__main__":
+def serve():
     if CFG.host in ("0.0.0.0", "::"):
         sys.exit("refusing to listen on all interfaces; use 127.0.0.1 or your Tailscale IP")
+    print(f"MyLibrary UI on http://{CFG.host}:{CFG.port}")
     app.run(host=CFG.host, port=CFG.port, debug=False, threaded=True)
+    return 0
+
+
+if __name__ == "__main__":
+    serve()

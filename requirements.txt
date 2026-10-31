@@ -1,7 +1,0 @@
-# MyLibrary — Python dependencies
-# Install with:
-#   pip3 install -r requirements.txt --break-system-packages
-# System: ffmpeg (ffprobe), Ollama >= 0.5 for the classify step
-
-guessit>=3.8
-flask>=3.0

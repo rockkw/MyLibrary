@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config.ini"
+REPO_CONFIG = Path(__file__).resolve().parents[2] / "config.ini"
 
 
 def expand(value: str) -> str:
@@ -69,7 +69,10 @@ class Config:
 
 
 def load(path: str | os.PathLike | None = None) -> Config:
-    path = Path(path or os.environ.get("MYLIBRARY_CONFIG") or DEFAULT_CONFIG)
+    if not path:
+        path = os.environ.get("MYLIBRARY_CONFIG") or (
+            "config.ini" if Path("config.ini").exists() else REPO_CONFIG)
+    path = Path(path).resolve()
     cp = configparser.ConfigParser(interpolation=None)
     if path.exists():
         cp.read(path)

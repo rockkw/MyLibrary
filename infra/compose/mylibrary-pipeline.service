@@ -4,6 +4,6 @@ Description=MyLibrary pipeline (no renames)
 
 [Service]
 Type=oneshot
-WorkingDirectory=%h/MyLibrary
-Environment=MYLIBRARY_CONFIG=%h/MyLibrary/config.ini
-ExecStart=/usr/bin/python3 %h/MyLibrary/mylib.py pipeline
+WorkingDirectory=%h/src/MyLibrary
+Environment=MYLIBRARY_CONFIG=%h/src/MyLibrary/config.ini
+ExecStart=%h/.local/bin/mylib pipeline
