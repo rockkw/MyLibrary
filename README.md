@@ -25,11 +25,40 @@ ffprobe  guessit   Ollama on     DB only  UI / CLI   rename    inode +
 | `mylib scan` | Walks `[library] roots`, runs ffprobe, fingerprints (first+last 1 MiB). Unplugged drives are skipped, not marked missing. | read only |
 | `mylib parse` | guessit on filename and parent folder, then a confidence score. Low scores are flagged. | no |
 | `mylib classify` | Sends **flagged files only** to local Ollama; strict JSON schema, temperature 0. | no |
-| `mylib plan` | Builds target paths `Movies/Title (Year)/Title (Year) - 1080p.ext`, detects conflicts, auto-approves ≥ 0.90. | no |
+| `mylib plan` | Builds target paths `Movies/Title (Year)/Title (Year) - 1080p.ext` or `Shows/Series (Year)/Season 01/Series (Year) - S01E04 - Title - 1080p.ext`, detects conflicts, auto-approves ≥ 0.90. | no |
 | review | Approve / skip / edit in the UI or with `mylib approve|skip|edit`. | no |
 | `mylib apply` | **Dry run.** Add `--execute` to rename. | renames only |
 | `mylib verify --run N` | Re-checks a run any time. | no |
 | `mylib undo --run N` | Dry run; `--execute` reverses a whole run. | renames only |
+
+
+**Music** is identified only from embedded tags (album artist first) and planned into
+`music_dir` using `music_layout`. Tracks skip the LLM. Missing artist, album or title
+means no target until reviewed, and a missing track number also needs review.
+Placeholder tags such as "Unknown Artist" count as missing. Only the audio file moves:
+cover art and other album files stay behind unless they share its stem and extension
+is in `sidecar_extensions`.
+
+**Software** is identified from names under `software_extensions` and planned into
+`software_dir/Title/`, keeping the original file name. Files are fingerprinted but
+never opened or run. Only an installer with a clear name and version can be auto;
+archives, ISOs and titles suggested by the LLM always need review. Each ISO stays a
+film or becomes software from the signs in its name, and unclear ones go to review.
+
+**Downloads in progress:** a file changed within `settle_minutes` (default 10) goes to
+review instead of auto, and `apply` refuses any file whose modified time changed since
+the scan. Moving a file a torrent client is still using can make it download again, so
+finish or pause downloads first, and expect seeding to stop for renamed files.
+
+**TV episodes** are recognised by `S01E04`-style names and planned into `tv_dir`
+using `tv_layout`. They skip the LLM and IMDb check. A file without one season and
+one episode number has no target and waits for review; multi-episode files always
+need review. After upgrading, run `mylib parse --redo`, `mylib classify`, then
+`mylib plan` once, so already-scanned episodes pick up their numbers. That re-asks
+the LLM about flagged files, including ones already organized, so it can propose a
+new title for a file you renamed earlier: skip those in review. Fix an episode by
+hand with `mylib edit ID --title "Series" --season 1 --episode 4`, or use
+`--kind movie` if it is not an episode.
 
 ## No-delete guarantees
 

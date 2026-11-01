@@ -36,6 +36,14 @@ SYSTEM = (
 )
 
 
+SOFTWARE_SYSTEM = (
+    "You identify software products from messy file names. Reply with JSON only. "
+    "title is the product name without version, architecture or installer words. "
+    "If the name is random or you are not sure, use null for the title and lower the "
+    "confidence (0.0-1.0) instead of guessing. year is null. kind is 'unknown'."
+)
+
+
 def build_prompt(path: str, duration, guess: dict) -> str:
     parts = os.path.normpath(path).split(os.sep)
     return json.dumps({
@@ -48,13 +56,13 @@ def build_prompt(path: str, duration, guess: dict) -> str:
     }, ensure_ascii=False)
 
 
-def ask(cfg, prompt: str, opener=urllib.request.urlopen) -> dict:
+def ask(cfg, prompt: str, opener=urllib.request.urlopen, system: str = SYSTEM) -> dict:
     body = json.dumps({
         "model": cfg.ollama_model,
         "stream": False,
         "format": SCHEMA,
         "options": {"temperature": 0},
-        "messages": [{"role": "system", "content": SYSTEM},
+        "messages": [{"role": "system", "content": system},
                      {"role": "user", "content": prompt}],
     }).encode()
     req = urllib.request.Request(f"{cfg.ollama_url}/api/chat", data=body,
@@ -75,7 +83,7 @@ def classify_all(con, cfg, limit=None, redo=False, log=print, opener=None) -> di
         return stats
     where = "p.flagged=1 AND p.source='guessit'" if not redo else \
             "p.flagged=1 AND p.source IN ('guessit','llm')"
-    sql = f"""SELECT f.id, f.path, f.duration, p.guessit_json FROM parses p
+    sql = f"""SELECT f.id, f.path, f.duration, p.guessit_json, p.kind FROM parses p
               JOIN files f ON f.id=p.file_id WHERE f.missing=0 AND {where}
               ORDER BY f.id"""
     rows = con.execute(sql + (f" LIMIT {int(limit)}" if limit else "")).fetchall()
@@ -83,7 +91,8 @@ def classify_all(con, cfg, limit=None, redo=False, log=print, opener=None) -> di
     for i, r in enumerate(rows, 1):
         prompt = build_prompt(r["path"], r["duration"], json.loads(r["guessit_json"] or "{}"))
         try:
-            ans = ask(cfg, prompt, **({"opener": opener} if opener else {}))
+            ans = ask(cfg, prompt, **({"opener": opener} if opener else {}),
+                      system=SOFTWARE_SYSTEM if r["kind"] == "software" else SYSTEM)
         except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError) as e:
             stats["errors"] += 1
             log(f"  ! {os.path.basename(r['path'])}: {e}")
@@ -98,6 +107,10 @@ def classify_all(con, cfg, limit=None, redo=False, log=print, opener=None) -> di
         conf = max(0.0, min(float(ans.get("confidence") or 0), cfg.llm_max_conf))
         kind = ans.get("kind") if ans.get("kind") in SCHEMA["properties"]["kind"]["enum"] \
             else "unknown"
+        if kind == "unknown":  # "can't tell" should not erase what the parser saw
+            kind = r["kind"] or "unknown"
+        if r["kind"] == "software":  # the movie question does not apply
+            kind, year = "software", None
         title = (ans.get("title") or "").strip() or None
         con.execute("""UPDATE parses SET title=?, year=?, kind=?, source='llm',
                        confidence=?, flagged=?, llm_json=?, updated_at=? WHERE file_id=?""",

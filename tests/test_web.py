@@ -55,3 +55,38 @@ def test_edit_sets_edition(client):
                                          "edition": "Final Cut"}).get_json()
     assert res["dst"].endswith("Alien (1979) - Final Cut.mkv")
     assert '--edition "Final Cut"' in res["cli"]
+
+
+def test_edit_episode_through_api(client):
+    pid = client.get("/api/proposals?status=auto").get_json()["items"][0]["id"]
+    r = client.post("/api/edit", json={
+        "id": pid, "title": "Show", "year": "", "edition": "", "kind": "episode",
+        "season": "1", "episode": "4", "episode_last": "", "episode_title": "Pilot"}).get_json()
+    assert r["status"] == "approved"
+    assert "Shows/Show/Season 01/Show - S01E04 - Pilot" in r["dst"]
+    assert '--season 1 --episode 4 --episode-title "Pilot"' in r["cli"]
+    d = client.get(f"/api/proposals?q=Show").get_json()["items"][0]
+    assert (d["kind"], d["season"], d["episode"]) == ("episode", 1, 4)
+
+
+def test_edit_movie_through_api_still_works(client):
+    pid = client.get("/api/proposals?status=auto").get_json()["items"][0]["id"]
+    r = client.post("/api/edit", json={
+        "id": pid, "title": "A Film", "year": "1999", "edition": "", "kind": "movie",
+        "season": "", "episode": "", "episode_last": "", "episode_title": ""}).get_json()
+    assert "Movies/A Film (1999)/" in r["dst"]
+
+
+@pytest.mark.parametrize("extra,expected,cli", [
+    ({"kind": "music", "artist": "Band", "album": "Debut", "track": "2"},
+     "Music/Band/Debut/02 - A Name", '--artist "Band" --album "Debut" --track 2'),
+    ({"kind": "software"}, "Software/A Name/", "--kind software")])
+def test_edit_music_and_software_through_api(client, extra, expected, cli):
+    pid = client.get("/api/proposals?status=auto").get_json()["items"][0]["id"]
+    form = dict(id=pid, title="A Name", year="", edition="", season="", episode="",
+                episode_last="", episode_title="", artist="", album="", track="", disc="")
+    r = client.post("/api/edit", json={**form, **extra}).get_json()
+    assert r["status"] == "approved" and expected in r["dst"] and cli in r["cli"]
+    item = client.get(f"/api/proposal/{pid}").get_json()
+    assert item["kind"] == extra["kind"]
+

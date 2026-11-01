@@ -17,11 +17,28 @@ movies_dir = Movies
 ; Jellyfin naming: Movies/Title (Year)/Title (Year) - Director's Cut - 1080p.mkv
 ; {edition} and {quality} are empty when unknown
 layout = {title} ({year})/{title} ({year}){edition}{quality}
+; TV episodes: Shows/Series (Year)/Season 01/Series (Year) - S01E04 - Title - 1080p.mkv
+; {year}, {episode_title} and {quality} are empty when unknown
+tv_dir = Shows
+tv_layout = {title}{year}/Season {season}/{title}{year} - S{season}E{episode}{episode_title}{quality}
+; Music comes from embedded tags: Music/Artist/Album/01 - Title.mp3
+; {track} is "01 - " or "1-01 - " on a multi-disc album, empty when unknown; {year} is " (2017)"
+music_dir = Music
+music_layout = {artist}/{album}/{track}{title}
+audio_extensions = mp3,flac,m4a,aac,ogg,opus,wav,wma,aiff,ape
+; Software keeps its original file name. Files are fingerprinted, never opened or run.
+; Keep {title}/ as the first folder: a rescan reads the title back from it.
+software_dir = Software
+software_layout = {title}/{filename}
+software_extensions = exe,msi,deb,rpm,dmg,pkg,appimage,zip,rar,7z,tgz,tar.gz,tar.xz,tar.bz2
+; iso stays in video_extensions; each ISO is sorted into video or software by its name
 video_extensions = mkv,mp4,m4v,avi,mov,wmv,mpg,mpeg,ts,m2ts,webm,iso
 ; Moved alongside the video when they share its file name stem
 sidecar_extensions = srt,sub,idx,ass,ssa,vtt,nfo
 ignore_words = sample,trailer
 min_duration_minutes = 40
+; Files changed this recently go to review, not auto: they may still be downloading
+settle_minutes = 10
 
 [ollama]
 enabled = true

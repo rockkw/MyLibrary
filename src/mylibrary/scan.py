@@ -7,6 +7,7 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from .config import has_ext
 from .db import now
 
 SAFETY_DIR = ".mylibrary-safety"
@@ -42,6 +43,9 @@ def ffprobe(path: str) -> dict:
     subs = [s for s in streams if s.get("codec_type") == "subtitle"]
     lang = lambda s: (s.get("tags") or {}).get("language", "und")
     fmt = data.get("format", {})
+    tags = {}  # MP3 and FLAC keep tags on the format, Ogg and Opus on the stream
+    for source in ([s.get("tags") for s in a[:1]] + [fmt.get("tags")]):
+        tags.update({k.lower(): v for k, v in (source or {}).items()})
     dur = fmt.get("duration") or v.get("duration")
     return {
         "duration": float(dur) if dur else None,
@@ -52,18 +56,19 @@ def ffprobe(path: str) -> dict:
         "audio_langs": ",".join(sorted({lang(s) for s in a})),
         "sub_langs": ",".join(sorted({lang(s) for s in subs})),
         "container": fmt.get("format_name"),
+        "tags": tags,
         "probe_error": None,
     }
 
 
-def iter_videos(root: Path, video_ext: set[str]):
+def iter_media(root: Path, extensions: set[str]):
     for dirpath, dirnames, filenames in os.walk(root):
         # skip hidden folders, including our own safety snapshots
         dirnames[:] = [d for d in dirnames if not d.startswith(".")]
         for name in filenames:
             if name.startswith("."):
                 continue
-            if name.rsplit(".", 1)[-1].lower() in video_ext:
+            if has_ext(name, extensions):
                 yield os.path.join(dirpath, name)
 
 
@@ -89,7 +94,8 @@ def scan(con, cfg, roots=None, log=print, workers=4) -> dict:
         known = {r["path"]: r for r in con.execute(
             "SELECT path, inode, size, mtime FROM files WHERE root=?", (str(root),))}
         todo, seen = [], set()
-        for path in iter_videos(root, cfg.video_ext):
+        wanted = cfg.video_ext | cfg.audio_ext | cfg.software_ext
+        for path in iter_media(root, wanted):
             seen.add(path)
             st = os.stat(path)
             k = known.get(path)
@@ -99,11 +105,15 @@ def scan(con, cfg, roots=None, log=print, workers=4) -> dict:
                 continue
             stats["changed" if k else "new"] += 1
             todo.append((path, st))
-        log(f"{root}: {len(seen)} videos, {len(todo)} to probe")
+        log(f"{root}: {len(seen)} media files, {len(todo)} to probe")
 
         def work(item):
             path, st = item
-            info = ffprobe(path)
+            # Software is only fingerprinted: its contents are never opened or run.
+            software = has_ext(path, cfg.software_ext) and not has_ext(path, cfg.video_ext)
+            info = {} if software else ffprobe(path)
+            info["tags"] = json.dumps(info["tags"], ensure_ascii=False) \
+                if info.get("tags") and has_ext(path, cfg.audio_ext) else None
             try:
                 info["quick_hash"] = quick_hash(path, st.st_size)
             except OSError as e:
@@ -116,8 +126,8 @@ def scan(con, cfg, roots=None, log=print, workers=4) -> dict:
                 con.execute("""
                     INSERT INTO files (path, root, dev, inode, size, mtime, quick_hash,
                         duration, width, height, vcodec, acodec, audio_langs, sub_langs,
-                        container, probe_error, missing, scanned_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?)
+                        container, tags, probe_error, missing, scanned_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?)
                     ON CONFLICT(path) DO UPDATE SET
                         dev=excluded.dev, inode=excluded.inode, size=excluded.size,
                         mtime=excluded.mtime, quick_hash=excluded.quick_hash,
@@ -125,13 +135,15 @@ def scan(con, cfg, roots=None, log=print, workers=4) -> dict:
                         height=excluded.height, vcodec=excluded.vcodec,
                         acodec=excluded.acodec, audio_langs=excluded.audio_langs,
                         sub_langs=excluded.sub_langs, container=excluded.container,
+                        tags=excluded.tags,
                         probe_error=excluded.probe_error, missing=0,
                         scanned_at=excluded.scanned_at
                 """, (path, str(root), st.st_dev, st.st_ino, st.st_size, st.st_mtime,
                       info.get("quick_hash"), info.get("duration"), info.get("width"),
                       info.get("height"), info.get("vcodec"), info.get("acodec"),
                       info.get("audio_langs"), info.get("sub_langs"),
-                      info.get("container"), info.get("probe_error"), now()))
+                      info.get("container"), info.get("tags"), info.get("probe_error"),
+                      now()))
                 if i % 100 == 0:
                     con.commit()
                     log(f"  probed {i}/{len(todo)}")

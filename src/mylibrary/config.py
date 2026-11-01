@@ -45,6 +45,19 @@ def _list(raw: str) -> list[str]:
     return items
 
 
+TV_LAYOUT = "{title}{year}/Season {season}/{title}{year} - S{season}E{episode}{episode_title}{quality}"
+MUSIC_LAYOUT = "{artist}/{album}/{track}{title}"
+SOFTWARE_LAYOUT = "{title}/{filename}"
+AUDIO_EXT = "mp3,flac,m4a,aac,ogg,opus,wav,wma,aiff,ape"
+SOFTWARE_EXT = "exe,msi,deb,rpm,dmg,pkg,appimage,zip,rar,7z,tgz,tar.gz,tar.xz,tar.bz2"
+
+
+def has_ext(name: str, extensions: set[str]) -> bool:
+    """Match the last suffix, or the last two so "tar.gz" works."""
+    parts = name.lower().split(".")
+    return len(parts) > 1 and (parts[-1] in extensions or ".".join(parts[-2:]) in extensions)
+
+
 @dataclass
 class Config:
     db_file: Path
@@ -52,10 +65,19 @@ class Config:
     roots: list[Path]
     movies_dir: str = "Movies"
     layout: str = "{title} ({year})/{title} ({year}){edition}{quality}"
+    tv_dir: str = "Shows"
+    tv_layout: str = TV_LAYOUT
+    music_dir: str = "Music"
+    music_layout: str = MUSIC_LAYOUT
+    software_dir: str = "Software"
+    software_layout: str = SOFTWARE_LAYOUT
     video_ext: set[str] = field(default_factory=set)
+    audio_ext: set[str] = field(default_factory=set)
+    software_ext: set[str] = field(default_factory=set)
     sidecar_ext: set[str] = field(default_factory=set)
     ignore_words: list[str] = field(default_factory=list)
     min_duration_min: float = 40.0
+    settle_minutes: float = 10.0
     ollama_enabled: bool = True
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "mistral"
@@ -87,6 +109,16 @@ def load(path: str | os.PathLike | None = None) -> Config:
         roots=[Path(p) for p in _list(cp.get("library", "roots", fallback=""))],
         movies_dir=get("library", "movies_dir", "Movies"),
         layout=get("library", "layout", "{title} ({year})/{title} ({year}){edition}{quality}"),
+        tv_dir=get("library", "tv_dir", "Shows"),
+        tv_layout=get("library", "tv_layout", TV_LAYOUT),
+        music_dir=get("library", "music_dir", "Music"),
+        music_layout=get("library", "music_layout", MUSIC_LAYOUT),
+        software_dir=get("library", "software_dir", "Software"),
+        software_layout=get("library", "software_layout", SOFTWARE_LAYOUT),
+        audio_ext={e.lower().lstrip(".") for e in _list(cp.get(
+            "library", "audio_extensions", fallback=AUDIO_EXT))},
+        software_ext={e.lower().lstrip(".") for e in _list(cp.get(
+            "library", "software_extensions", fallback=SOFTWARE_EXT))},
         video_ext={e.lower().lstrip(".") for e in _list(cp.get(
             "library", "video_extensions",
             fallback="mkv,mp4,m4v,avi,mov,wmv,mpg,mpeg,ts,m2ts,webm,iso"))},
@@ -95,6 +127,7 @@ def load(path: str | os.PathLike | None = None) -> Config:
         ignore_words=[w.lower() for w in _list(cp.get(
             "library", "ignore_words", fallback="sample,trailer"))],
         min_duration_min=float(get("library", "min_duration_minutes", "40")),
+        settle_minutes=float(get("library", "settle_minutes", "10")),
         ollama_enabled=get("ollama", "enabled", "true").lower() in ("1", "true", "yes"),
         ollama_url=get("ollama", "url", "http://localhost:11434").rstrip("/"),
         ollama_model=get("ollama", "model", "mistral"),

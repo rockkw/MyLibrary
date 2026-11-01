@@ -34,6 +34,7 @@ db_file = {tmp_path}/state/inv.db
 [library]
 roots = {root}
 min_duration_minutes = 0
+settle_minutes = 0
 [ollama]
 enabled = false
 """)

@@ -3,7 +3,9 @@
 Local, LLM-assisted movie library organizer for Rock's home media server
 (Ubuntu box, SSD1/SSD2/SSD3 on an OWC Thunderbolt dock, Jellyfin, Ollama on an
 RTX 5080). Renames messy movie files into Jellyfin layout
-`Movies/Title (Year)/Title (Year) - Director's Cut - 1080p.ext`. **It must never delete or
+`Movies/Title (Year)/Title (Year) - Director's Cut - 1080p.ext`, and TV episodes into
+`Shows/Series (Year)/Season 01/Series (Year) - S01E04 - Title - 1080p.ext`. Music goes to
+`Music/Artist/Album/01 - Title.ext` and software to `Software/Title/original-name.ext`. **It must never delete or
 overwrite a file.**
 
 ## Hard rules (do not break, do not weaken tests to make a change pass)
@@ -19,6 +21,12 @@ overwrite a file.**
   LLM-only answers always need human review unless the offline IMDb check confirms.
 - Duplicates and empty folders: report only. Snapshot folders
   (`<root>/.mylibrary-safety/run-N/`) are removed by the user, never by code.
+- Episodes skip the LLM and IMDb check. Without one season and one episode number they
+  have no target and go to review; multi-episode files always go to review.
+- Music identity comes only from embedded tags and skips the LLM. Tags are untrusted input:
+  they reach file paths, so every part goes through `plan.clean`.
+- Software files are never probed, opened, or run. Only installers with a clear name and
+  version can be auto; archives, ISOs, and LLM-suggested titles always need review.
 - When testing on real media: dry run first (`mylib apply` without `--execute`).
   Never run `--execute` or `undo --execute` on real drives without Rock's explicit OK.
 
@@ -33,7 +41,7 @@ overwrite a file.**
 ```
 src/mylibrary/   config db scan parse classify imdb plan review apply safefs dupes cli
 src/mylibrary/web/  Flask UI (MyMagnet look: #111 bg, #f90 amber, three panes)
-tests/           pytest (52 tests)
+tests/           pytest
 infra/compose/   systemd user units (web service, nightly pipeline timer: no renames)
 mylib.py         run-from-repo shim
 ```
@@ -44,6 +52,9 @@ pip3 install -e ".[test]" --break-system-packages
 pytest -q
 mylib pipeline        # scan + parse + classify + plan
 mylib review | approve ID | skip ID | edit ID --title T --year Y [--edition E]
+mylib edit ID --title SERIES --season S --episode E [--episode-last N] [--episode-title T]
+mylib edit ID --title TRACK --artist A --album B [--track N] [--disc N]
+mylib edit ID --title PRODUCT --kind software
 mylib apply           # dry run; --execute to rename (then auto-verify)
 mylib runs | verify --run N | undo --run N [--execute] | dupes | status
 mylib serve           # UI on http://127.0.0.1:5051

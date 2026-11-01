@@ -2,7 +2,7 @@
 
 Safety layers, in order:
   1. Dry run by default; nothing moves without execute=True (CLI: --execute).
-  2. Pre-checks: file unchanged since scan (same inode + size), target free,
+  2. Pre-checks: file unchanged since scan (same inode, size, mtime), target free,
      same drive, no two items claiming the same target.
   3. Hard-link safety snapshot of every file before it moves, under
      <root>/.mylibrary-safety/run-<N>/ (costs no disk space).
@@ -63,7 +63,7 @@ def _sidecars(src: str, dst: str, sidecar_ext: set[str]):
 
 
 def prepare(con, cfg, plan_id) -> dict:
-    items = con.execute("""SELECT pr.id pid, pr.file_id, pr.src, pr.dst, f.root, f.inode, f.size
+    items = con.execute("""SELECT pr.id pid, pr.file_id, pr.src, pr.dst, f.root, f.inode, f.size, f.mtime
                            FROM proposals pr JOIN files f ON f.id=pr.file_id
                            WHERE pr.plan_id=? AND pr.status IN ('auto','approved')
                            AND pr.dst IS NOT NULL ORDER BY pr.src""", (plan_id,)).fetchall()
@@ -75,7 +75,9 @@ def prepare(con, cfg, plan_id) -> dict:
             st = os.lstat(src)
         except FileNotFoundError:
             st, why = None, "source missing (run scan)"
-        if st and (st.st_ino != it["inode"] or st.st_size != it["size"]):
+        # Downloaders preallocate, so size alone cannot show that a file is still filling up.
+        if st and (st.st_ino != it["inode"] or st.st_size != it["size"]
+                   or abs(st.st_mtime - (it["mtime"] or 0)) >= 1):
             why = "file changed since scan (run scan)"
         elif os.path.lexists(dst):
             why = "target already exists"

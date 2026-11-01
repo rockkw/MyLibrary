@@ -11,6 +11,7 @@ import string
 
 from guessit import guessit
 
+from .config import has_ext
 from .db import now
 
 GENERIC = {"movie", "video", "film", "final", "cut", "untitled", "new", "copy",
@@ -25,15 +26,17 @@ EDITION_LABELS = {"Collector": "Collector's Edition", "Deluxe": "Deluxe Edition"
 ALT_EDITION = re.compile(r"\b(cut|edition|version)$|^redux$", re.I)
 
 
-def _guess(text: str) -> dict:
+def _guess(text: str, media_type: str = "movie") -> dict:
     try:
-        g = dict(guessit(text, {"type": "movie"}))
+        g = dict(guessit(text, {"type": media_type}))
     except Exception:  # guessit can choke on odd strings
         return {}
     out = {}
     for k, v in g.items():
-        if k in ("edition", "alternative_title") and isinstance(v, list):
+        if k in ("edition", "alternative_title", "episode_title") and isinstance(v, list):
             out[k] = [str(x) for x in v]
+        elif k in ("season", "episode") and isinstance(v, list):
+            out[k] = [x for x in v if isinstance(x, int)]
         else:
             out[k] = v if isinstance(v, (str, int, float, bool, type(None))) else str(v)
     return out
@@ -50,6 +53,75 @@ def edition_of(g: dict) -> str | None:
     return " - ".join(dict.fromkeys(labels)) or None
 
 
+def full_title(g: dict, name: str) -> str:
+    """guessit splits "Spider-Man - Brand New Day (2026)" at the dash; put the subtitle back.
+
+    Only text before the year counts as title. Edition words are handled by edition_of.
+    """
+    title = (g.get("title") or "").strip()
+    year_at = name.find(str(g.get("year"))) if g.get("year") else -1
+    for alt in _as_list(g.get("alternative_title")):
+        if not ALT_EDITION.search(alt) and -1 < name.find(alt) < year_at:
+            title = f"{title} {alt}"
+    return title
+
+
+def _numbers(v) -> list[int]:
+    return sorted(x for x in (v if isinstance(v, list) else [v]) if isinstance(x, int))
+
+
+def identify_episode(path: str, reasons: list) -> dict:
+    """Identify a file already known to carry a season or episode marker.
+
+    The title is the series name. Episodes skip the LLM: a model that names movies
+    adds nothing to S01E04, and it could turn a good parse into a wrong one. Anything
+    uncertain goes straight to human review.
+    """
+    name = os.path.basename(path)
+    parent = os.path.basename(os.path.dirname(path))
+    g = _guess(name, "episode")
+    if not g.get("title"):  # Series/Season 01/S01E04.mkv
+        parts = os.path.normpath(path).split(os.sep)[-3:]
+        g = {**_guess(os.path.join(*parts), "episode"), **g}
+        reasons.append("series title taken from folder name")
+
+    title = (g.get("title") or "").strip()
+    folder_title = (_guess(parent, "episode").get("title") or "").strip() if parent else ""
+    if folder_title.casefold() == title.casefold():  # agatha.all.along.s01e04.mkv
+        title = folder_title
+    if title.islower():
+        title = string.capwords(title)
+    if title and g.get("country"):  # The Office (US) is not The Office (UK)
+        title = f"{title} ({g['country']})"
+
+    seasons, episodes = _numbers(g.get("season")), _numbers(g.get("episode"))
+    conf = 0.95
+    if len(seasons) != 1 or not episodes:
+        conf = 0.5
+        reasons.append("no season or episode number")
+    elif len(episodes) > 1:
+        conf = 0.7
+        reasons.append("multi-episode file")
+    if not title:
+        conf = 0.0
+        reasons.append("no usable title")
+    numbered = len(seasons) == 1 and episodes
+    return {
+        "title": title or None,
+        "year": g.get("year") if isinstance(g.get("year"), int) else None,
+        "edition": None,
+        "kind": "episode",
+        "season": seasons[0] if numbered else None,
+        "episode": episodes[0] if numbered else None,
+        "episode_last": episodes[-1] if numbered and len(episodes) > 1 else None,
+        "episode_title": " ".join(_as_list(g.get("episode_title"))) or None,
+        "confidence": conf,
+        "flagged": 0,
+        "reasons": "; ".join(reasons),
+        "guessit": g,
+    }
+
+
 def identify(path: str, duration: float | None, cfg) -> dict:
     """Return {title, year, edition, kind, confidence, flagged, reasons, guessit}."""
     name = os.path.basename(path)
@@ -58,13 +130,18 @@ def identify(path: str, duration: float | None, cfg) -> dict:
     g_dir = _guess(parent) if parent else {}
     reasons = []
 
+    is_sample = (any(re.search(rf"\b{re.escape(w)}\b", name.lower()) for w in cfg.ignore_words)
+                 or "Sample" in str(g_file.get("other")))
+    if not is_sample and (g_file.get("episode") is not None or g_file.get("season") is not None):
+        return identify_episode(path, reasons)
+
     g = g_file
     # A clean parent folder ("Alien (1979)") often beats a messy filename.
     if not g_file.get("year") and g_dir.get("year") and g_dir.get("title"):
         g = {**g_file, "title": g_dir["title"], "year": g_dir["year"]}
         reasons.append("title/year taken from folder name")
 
-    title = (g.get("title") or "").strip()
+    title = full_title(g_file, name) if g is g_file else (g.get("title") or "").strip()
     year = g.get("year") if isinstance(g.get("year"), int) else None
     edition = edition_of(g_file)
     # Only a folder naming this one film, so "Directors Cuts/" doesn't label everything in it.
@@ -73,18 +150,18 @@ def identify(path: str, duration: float | None, cfg) -> dict:
     kind = "movie"
     conf = 0.95
 
-    lower = name.lower()
-    if any(re.search(rf"\b{re.escape(w)}\b", lower) for w in cfg.ignore_words):
+    if is_sample:
         kind, reasons = "sample", reasons + ["matches ignore word"]
-    if g_file.get("episode") or g_file.get("season"):
-        kind, conf = "episode", conf - 0.3
-        reasons.append("looks like a TV episode")
     if duration and duration < cfg.min_duration_min * 60 and kind == "movie":
         kind, conf = "extra", conf - 0.3
         reasons.append(f"short ({duration/60:.0f} min)")
     if not year:
         conf -= 0.35
         reasons.append("no year")
+    # "01.mp4" may be one part of several, so a folder's title is not proof of a whole film.
+    if g is not g_file and os.path.splitext(name)[0].isdigit():
+        conf -= 0.2
+        reasons.append("numbered file")
     words = re.findall(r"[a-z]+", title.lower())
     if not title or len(title) < 2 or title.isdigit():
         conf -= 0.5
@@ -92,8 +169,6 @@ def identify(path: str, duration: float | None, cfg) -> dict:
     elif words and all(w in GENERIC for w in words):
         conf -= 0.5
         reasons.append("generic title")
-    if g.get("other") and "Sample" in str(g.get("other")):
-        kind = "sample"
     if year and not (1888 <= year <= 2100):
         conf -= 0.4
         reasons.append("implausible year")
@@ -105,15 +180,150 @@ def identify(path: str, duration: float | None, cfg) -> dict:
         "edition": edition,
         "kind": kind,
         "confidence": round(conf, 2),
-        "flagged": int(conf < cfg.auto_approve and kind in ("movie", "episode")),
+        "flagged": int(conf < cfg.auto_approve and kind == "movie"),
         "reasons": "; ".join(reasons),
         "guessit": g_file,
     }
 
 
+PLACEHOLDER = re.compile(r"(unknown( artist| album| title)?|untitled|no title|track\s*\d*|various)$", re.I)
+INSTALLERS = ("exe", "msi", "deb", "rpm", "dmg", "pkg", "appimage")
+VERSION = r"v?\d+(?:\.\d+)+"
+NOISE = (r"x64|x86|x86[-_]64|amd64|arm64|aarch64|win32|win64|setup|install|installer|portable"
+         r"|linux|windows|macos|mac|universal|full|final|build")
+TITLE_END = re.compile(rf"(?<=.)(?:[-_. ])({VERSION}|{NOISE})(?=$|[-_. ])", re.I)
+GENERIC_STEM = re.compile(r"(setup|install|installer|autorun|start|update|data\d*)$", re.I)
+SOFTWARE_WORDS = re.compile(rf"(?:^|[-_. ])({VERSION}|x64|x86|amd64|arm64|win32|win64|setup|install"
+                            r"|installer|windows|linux|server|desktop|ubuntu|debian|fedora|kali)"
+                            r"(?=$|[-_. ])", re.I)
+MULTI_PART = re.compile(r"\.part\d+\.rar$|\.7z\.\d+$", re.I)
+
+
+def _tag_text(tags: dict, *keys) -> str | None:
+    for key in keys:
+        value = str(tags.get(key) or "").strip()
+        if value and not PLACEHOLDER.fullmatch(value):
+            return value
+    return None
+
+
+def _tag_number(tags: dict, *keys) -> tuple[int | None, int | None]:
+    """Parse "3/12" into (3, 12). ID3 and Vorbis tags both use this form."""
+    for key in keys:
+        m = re.fullmatch(r"\s*(\d+)\s*(?:/\s*(\d+))?\s*", str(tags.get(key) or ""))
+        if m:
+            return int(m[1]), int(m[2]) if m[2] else None
+    return None, None
+
+
+def identify_music(tags: dict) -> dict:
+    """Identify a track from embedded tags. The title is the track title.
+
+    Filenames are not trusted here. Tracks skip the LLM: a wrong artist is worse than
+    a file left for review. Album artist wins so a guest verse stays in the same folder.
+    """
+    artist = _tag_text(tags, "album_artist", "albumartist", "album artist")
+    if not artist and str(tags.get("compilation") or "").lower() in ("1", "true", "yes"):
+        artist = "Various Artists"
+    artist = artist or _tag_text(tags, "artist")
+    album, title = _tag_text(tags, "album"), _tag_text(tags, "title")
+    track, _ = _tag_number(tags, "track", "tracknumber")
+    disc, discs = _tag_number(tags, "disc", "discnumber")
+    year = re.search(r"\b(\d{4})\b", str(tags.get("date") or tags.get("year") or ""))
+    missing = [n for n, v in (("artist", artist), ("album", album), ("title", title)) if not v]
+    reasons = []
+    conf = 0.95
+    if not track:
+        conf = 0.7
+        reasons.append("no track number")
+    if missing:
+        conf = 0.5
+        reasons.insert(0, "missing tags: " + ", ".join(missing))
+    return {
+        "title": title, "year": int(year[1]) if year else None, "edition": None, "kind": "music",
+        "artist": artist, "album": album, "track": track,
+        "disc": disc if (discs or 0) > 1 or (disc or 0) > 1 else None,
+        "confidence": conf, "flagged": 0, "reasons": "; ".join(reasons), "guessit": {},
+    }
+
+
+def _software_title(stem: str) -> tuple[str, bool]:
+    """Return (product name, whether a dotted version followed it)."""
+    m = TITLE_END.search(stem)
+    title = re.sub(r"[-_. ]+", " ", stem[:m.start()] if m else stem).strip()
+    if title.islower():
+        title = string.capwords(title)
+    return title, bool(m and re.fullmatch(VERSION, m[1], re.I))
+
+
+def _archive_stem(name: str) -> str:
+    stem = re.sub(r"\.(tar\.\w+|part\d+\.rar|7z\.\d+)$", "", name, flags=re.I)
+    return stem if stem != name else os.path.splitext(name)[0]
+
+
+def identify_software(path: str, root: str, cfg, reasons: list | None = None) -> dict:
+    """Identify software from its name. Nothing here reads the file.
+
+    Only an installer with a clear name and version can pass without a human, so a
+    stray setup.exe or an archive that could hold anything always gets looked at.
+    """
+    name = os.path.basename(path)
+    parent = os.path.dirname(path)
+    reasons = list(reasons or [])
+    title, versioned = _software_title(_archive_stem(name))
+    # Already in Software/Title/: the folder is the answer, so a rescan changes nothing.
+    if os.path.dirname(parent) == os.path.join(root, cfg.software_dir):
+        title, conf = os.path.basename(parent), 0.95
+    else:
+        if not title or GENERIC_STEM.fullmatch(title):
+            folder = os.path.basename(parent) if parent != root else ""
+            title = _software_title(folder)[0]
+            versioned = False
+            reasons.append("title taken from folder name" if title else "no usable title")
+        installer = name.rsplit(".", 1)[-1].lower() in INSTALLERS
+        conf = 0.92 if installer and versioned and not reasons else 0.6
+        if not installer:
+            reasons.append("contents unknown")
+        if MULTI_PART.search(name):
+            reasons.append("multi-part archive: check every part moves together")
+    return {
+        "title": title or None, "year": None, "edition": None, "kind": "software",
+        "confidence": conf, "flagged": int(conf < cfg.auto_approve),
+        "reasons": "; ".join(reasons), "guessit": {},
+    }
+
+
+def iso_is_software(path: str, width) -> bool | None:
+    """True or False when the signs agree, None when an ISO is unclear.
+
+    Film ISOs carry a year, source or resolution; software ones a version or OS name.
+    """
+    name = os.path.basename(path)
+    g = _guess(name)
+    video = bool(width or g.get("year") or g.get("screen_size") or g.get("source"))
+    software = bool(SOFTWARE_WORDS.search(os.path.splitext(name)[0]))
+    return None if video == software else software
+
+
+def identify_file(r, cfg) -> dict:
+    """Pick the identifier for one files row."""
+    path = r["path"]
+    if has_ext(path, cfg.audio_ext):
+        return identify_music(json.loads(r["tags"] or "{}"))
+    if has_ext(path, cfg.software_ext) and not has_ext(path, cfg.video_ext):
+        return identify_software(path, r["root"], cfg)
+    if path.lower().endswith(".iso"):
+        verdict = iso_is_software(path, r["width"])
+        if verdict is not False:
+            return identify_software(path, r["root"], cfg, None if verdict else
+                                     ["unclear ISO: video or software"])
+    return identify(path, r["duration"], cfg)
+
+
 def parse_all(con, cfg, redo=False, log=print) -> dict:
     rows = con.execute("""
-        SELECT f.id, f.path, f.duration, p.source, p.updated_at, f.scanned_at
+        SELECT f.id, f.path, f.root, f.duration, f.width, f.tags, p.source, p.updated_at,
+               f.scanned_at
         FROM files f LEFT JOIN parses p ON p.file_id = f.id
         WHERE f.missing = 0""").fetchall()
     stats = {"parsed": 0, "flagged": 0, "kept_manual": 0, "kept_llm": 0}
@@ -126,17 +336,24 @@ def parse_all(con, cfg, redo=False, log=print) -> dict:
             continue
         if r["source"] == "guessit" and not redo and (r["updated_at"] or "") >= (r["scanned_at"] or ""):
             continue
-        info = identify(r["path"], r["duration"], cfg)
+        info = identify_file(r, cfg)
         con.execute("""
-            INSERT INTO parses (file_id, title, year, edition, kind, source, confidence,
+            INSERT INTO parses (file_id, title, year, edition, kind, season, episode, episode_last,
+                                episode_title, artist, album, track, disc, source, confidence,
                                 flagged, reasons, guessit_json, llm_json, updated_at)
-            VALUES (?,?,?,?,?, 'guessit', ?,?,?,?, NULL, ?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'guessit', ?,?,?,?, NULL, ?)
             ON CONFLICT(file_id) DO UPDATE SET title=excluded.title, year=excluded.year,
-                edition=excluded.edition, kind=excluded.kind, source='guessit', confidence=excluded.confidence,
+                edition=excluded.edition, kind=excluded.kind, season=excluded.season,
+                episode=excluded.episode, episode_last=excluded.episode_last,
+                episode_title=excluded.episode_title, artist=excluded.artist, album=excluded.album,
+                track=excluded.track, disc=excluded.disc, source='guessit', confidence=excluded.confidence,
                 flagged=excluded.flagged, reasons=excluded.reasons,
                 guessit_json=excluded.guessit_json, llm_json=NULL, imdb_id=NULL,
                 updated_at=excluded.updated_at
-        """, (r["id"], info["title"], info["year"], info["edition"], info["kind"], info["confidence"],
+        """, (r["id"], info["title"], info["year"], info["edition"], info["kind"],
+              info.get("season"), info.get("episode"), info.get("episode_last"),
+              info.get("episode_title"), info.get("artist"), info.get("album"),
+              info.get("track"), info.get("disc"), info["confidence"],
               info["flagged"], info["reasons"], json.dumps(info["guessit"]), now()))
         stats["parsed"] += 1
         stats["flagged"] += info["flagged"]

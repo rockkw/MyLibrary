@@ -52,15 +52,21 @@ async function loadList(keep) {
   if (state.cur >= 0) loadDetail(); else $('#detail-pane').innerHTML =
     `<p class="empty">${d.plan_id ? 'Nothing here.' : 'No plan yet: run the pipeline.'}</p>`;
 }
+function episodeCode(r) {
+  if (r.kind !== 'episode' || r.season == null || r.episode == null) return '';
+  const pad = n => String(n).padStart(2, '0');
+  const last = r.episode_last && r.episode_last !== r.episode ? `-E${pad(r.episode_last)}` : '';
+  return `S${pad(r.season)}E${pad(r.episode)}${last}`;
+}
 function renderList() {
   $('#list').innerHTML = state.items.map((r, i) => {
     const res = r.height ? `${r.height}p` : '';
-    const to = r.title ? `${esc(r.title)}${r.year ? ` (${r.year})` : ''}` : '<i>unidentified</i>';
+    const to = r.title ? `${r.artist ? `${esc(r.artist)} - ` : ''}${esc(r.title)}${r.year ? ` (${r.year})` : ''}` : '<i>unidentified</i>';
     return `<div class="row ${i === state.cur ? 'sel' : ''}" data-i="${i}">
       <input type="checkbox" data-id="${r.id}" ${state.checked.has(r.id) ? 'checked' : ''}>
       <span class="conf ${confClass(r.confidence)}">${(r.confidence ?? 0).toFixed(2)}</span>
       <span class="pill ${r.status}">${r.status}</span>
-      <div class="names"><div class="to">${to}${r.edition ? `<span class="chip">${esc(r.edition)}</span>` : ''}${res ? `<span class="chip">${res}</span>` : ''}
+      <div class="names"><div class="to">${to}${episodeCode(r) ? `<span class="chip">${episodeCode(r)}</span>` : ''}${['music', 'software'].includes(r.kind) ? `<span class="chip">${r.kind}</span>` : ''}${r.edition ? `<span class="chip">${esc(r.edition)}</span>` : ''}${res ? `<span class="chip">${res}</span>` : ''}
         ${r.vcodec ? `<span class="chip">${esc(r.vcodec)}</span>` : ''}
         ${r.source ? `<span class="chip">${esc(r.source)}</span>` : ''}</div>
         <div class="from">${esc(base(r.src))}</div></div></div>`;
@@ -75,7 +81,7 @@ async function loadDetail() {
   const d = await api('/api/proposal/' + item.id);
   const decidable = !['applied', 'noop', 'ignored'].includes(d.status);
   $('#detail-pane').innerHTML = `
-    <h2>${d.title ? esc(d.title) + (d.year ? ` (${d.year})` : '') + (d.edition ? ` - ${esc(d.edition)}` : '') : 'Unidentified file'}</h2>
+    <h2>${d.title ? (d.artist ? esc(d.artist) + ' - ' : '') + esc(d.title) + (d.year ? ` (${d.year})` : '') + (d.edition ? ` - ${esc(d.edition)}` : '') + (episodeCode(d) ? ` - ${episodeCode(d)}` : '') : 'Unidentified file'}</h2>
     <span class="pill ${d.status}">${d.status}</span>
     <span class="conf ${confClass(d.confidence)}" style="padding:0 .4rem;margin-left:.3rem">
       ${(d.confidence ?? 0).toFixed(2)}</span>
@@ -83,20 +89,37 @@ async function loadDetail() {
     ${d.imdb_id ? `<span class="chip">${esc(d.imdb_id)}</span>` : ''}
     <div class="detail-label">Current</div><div class="path old">${esc(d.src)}</div>
     <div class="arrow">▼ rename (same drive, no overwrite)</div>
-    <div class="path new">${d.dst ? esc(d.dst) : '— needs a title —'}</div>
+    <div class="path new">${d.dst ? esc(d.dst) : `— ${{episode: 'needs series, season and episode', music: 'needs artist, album and title'}[d.kind] || 'needs a title'} —`}</div>
     ${d.reason ? `<div class="reason">${esc(d.reason)}</div>` : ''}
     ${decidable ? `
     <div class="detail-label">Identify</div>
-    <div class="edit"><input id="ed-title" value="${esc(d.title || '')}" placeholder="Title">
+    <div class="edit"><select id="ed-kind">
+        <option value="movie">Movie</option>
+        <option value="episode" ${d.kind === 'episode' ? 'selected' : ''}>TV episode</option>
+        <option value="music" ${d.kind === 'music' ? 'selected' : ''}>Music</option>
+        <option value="software" ${d.kind === 'software' ? 'selected' : ''}>Software</option></select>
+      <input id="ed-title" value="${esc(d.title || '')}" placeholder="Title">
       <input id="ed-year" value="${d.year || ''}" placeholder="Year">
-      <input id="ed-edition" value="${esc(d.edition || '')}" placeholder="Edition (optional)"></div>
+      <input id="ed-edition" value="${esc(d.edition || '')}" placeholder="Edition (optional)">
+      <div id="ed-tv">
+        <input id="ed-season" value="${d.season ?? ''}" placeholder="Season" inputmode="numeric">
+        <input id="ed-episode" value="${d.episode ?? ''}" placeholder="Episode" inputmode="numeric">
+        <input id="ed-episode-last" value="${d.episode_last ?? ''}" placeholder="Last ep" inputmode="numeric">
+        <input id="ed-episode-title" value="${esc(d.episode_title || '')}" placeholder="Episode title (optional)">
+      </div>
+      <div id="ed-music">
+        <input id="ed-artist" value="${esc(d.artist || '')}" placeholder="Artist">
+        <input id="ed-album" value="${esc(d.album || '')}" placeholder="Album">
+        <input id="ed-track" value="${d.track ?? ''}" placeholder="Track" inputmode="numeric">
+        <input id="ed-disc" value="${d.disc ?? ''}" placeholder="Disc" inputmode="numeric">
+      </div></div>
     <div class="btnrow">
       <button class="btn go" id="ed-save">Save & approve (e)</button>
       <button class="btn ok" data-dec="approve">Approve (a)</button>
       <button class="btn no" data-dec="skip">Skip (s)</button>
       ${['approved', 'skipped'].includes(d.status) ? '<button class="btn" data-dec="reset">Reset</button>' : ''}
     </div>
-    <div class="cli">mylib approve ${d.proposal_id} · mylib edit ${d.proposal_id} --title "…" --year … --edition "…"</div>` : ''}
+    <div class="cli">mylib approve ${d.proposal_id} · mylib edit ${d.proposal_id} --title "…" --year … --edition "…" · mylib edit ${d.proposal_id} --title "…" --season … --episode …</div>` : ''}
     <div class="detail-label">Media</div>
     <div class="info">
       <span>Size</span><span>${fmtSize(d.size || 0)}</span>
@@ -111,15 +134,38 @@ async function loadDetail() {
   $$('[data-dec]').forEach(b => b.onclick = () => decide([d.proposal_id], b.dataset.dec));
   const save = $('#ed-save');
   if (save) save.onclick = saveEdit;
-  $$('#ed-title, #ed-year, #ed-edition').forEach(el => el.onkeydown = e => {
+  $$('#ed-title, #ed-year, #ed-edition, #ed-tv input, #ed-music input').forEach(el => el.onkeydown = e => {
     if (e.key === 'Enter') saveEdit(); e.stopPropagation(); });
+  const kind = $('#ed-kind');
+  if (kind) {
+    const show = () => {
+      $('#ed-tv').hidden = kind.value !== 'episode';
+      $('#ed-music').hidden = kind.value !== 'music';
+      $('#ed-edition').hidden = kind.value !== 'movie';
+      $('#ed-year').hidden = kind.value === 'software';
+      $('#ed-title').placeholder = {episode: 'Series', music: 'Track title',
+                                    software: 'Product'}[kind.value] || 'Title';
+    };
+    kind.onchange = show;
+    kind.onkeydown = e => e.stopPropagation();
+    show();
+  }
 }
 async function saveEdit() {
   const item = state.items[state.cur];
   try {
     const r = await api('/api/edit', {id: item.id, title: $('#ed-title').value,
                                       year: $('#ed-year').value,
-                                      edition: $('#ed-edition').value});
+                                      edition: $('#ed-edition').value,
+                                      kind: $('#ed-kind').value,
+                                      season: $('#ed-season').value,
+                                      episode: $('#ed-episode').value,
+                                      episode_last: $('#ed-episode-last').value,
+                                      episode_title: $('#ed-episode-title').value,
+                                      artist: $('#ed-artist').value,
+                                      album: $('#ed-album').value,
+                                      track: $('#ed-track').value,
+                                      disc: $('#ed-disc').value});
     note(`${r.cli} → ${r.status}`);
     await refresh(true);
   } catch (e) { note(e.message, true); }

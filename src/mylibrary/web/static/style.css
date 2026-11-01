@@ -108,10 +108,14 @@ code, .mono { font-family: ui-monospace, Menlo, monospace; }
   font-size: 0.8rem; }
 .info span:nth-child(odd) { color: #777; }
 .edit { display: grid; grid-template-columns: 1fr 80px; gap: 0.4rem; }
-.edit input { background: #111; border: 1px solid #444; color: #eee; padding: 0.4rem 0.55rem;
-  border-radius: 4px; font-size: 0.85rem; }
-#ed-edition { grid-column: 1 / -1; }
-.edit input:focus { outline: none; border-color: #f90; }
+.edit input, .edit select { background: #111; border: 1px solid #444; color: #eee;
+  padding: 0.4rem 0.55rem; border-radius: 4px; font-size: 0.85rem; min-width: 0; }
+#ed-edition, #ed-kind { grid-column: 1 / -1; }
+#ed-tv { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.4rem; }
+#ed-music { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; }
+#ed-tv[hidden], #ed-music[hidden], #ed-edition[hidden], #ed-year[hidden] { display: none; }
+#ed-episode-title { grid-column: 1 / -1; }
+.edit input:focus, .edit select:focus { outline: none; border-color: #f90; }
 .btnrow { display: flex; gap: 0.5rem; margin-top: 0.7rem; flex-wrap: wrap; }
 .btn { cursor: pointer; border-radius: 4px; padding: 0.4rem 0.9rem; font-size: 0.82rem;
   border: 1px solid #444; background: #222; color: #eee; }

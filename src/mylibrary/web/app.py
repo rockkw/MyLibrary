@@ -117,16 +117,29 @@ def api_decision():
 @app.post("/api/edit")
 def api_edit():
     body = request.get_json(force=True)
-    year = body.get("year")
-    year = int(year) if str(year or "").strip().isdigit() else None
+    number = lambda key: int(body[key]) if str(body.get(key) or "").strip().isdigit() else None
+    year, season, episode, last, track, disc = (number(k) for k in (
+        "year", "season", "episode", "episode_last", "track", "disc"))
+    kind = body.get("kind") or None
     try:
         res = review.edit(con(), CFG, int(body["id"]), body.get("title", ""), year,
-                          body.get("edition"))
+                          body.get("edition"), kind, season, episode, last,
+                          body.get("episode_title"), body.get("artist"), body.get("album"),
+                          track, disc)
     except ValueError as e:
         abort(400, str(e))
     res["cli"] = f'mylib edit {res["id"]} --title "{body.get("title","")}"' + \
         (f" --year {year}" if year else "") + \
-        (f' --edition "{body["edition"]}"' if body.get("edition") else "")
+        (f' --edition "{body["edition"]}"' if body.get("edition") else "") + \
+        (f" --kind {kind}" if kind else "") + \
+        (f" --season {season}" if season is not None else "") + \
+        (f" --episode {episode}" if episode is not None else "") + \
+        (f" --episode-last {last}" if last is not None else "") + \
+        (f' --episode-title "{body["episode_title"]}"' if body.get("episode_title") else "") + \
+        (f' --artist "{body["artist"]}"' if body.get("artist") else "") + \
+        (f' --album "{body["album"]}"' if body.get("album") else "") + \
+        (f" --track {track}" if track is not None else "") + \
+        (f" --disc {disc}" if disc is not None else "")
     return jsonify(res)
 
 

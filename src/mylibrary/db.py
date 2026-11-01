@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS files (
     audio_langs TEXT,
     sub_langs   TEXT,
     container   TEXT,
+    tags        TEXT,           -- JSON, audio files only
     probe_error TEXT,
     missing     INTEGER DEFAULT 0,
     scanned_at  TEXT
@@ -32,7 +33,15 @@ CREATE TABLE IF NOT EXISTS parses (
     title       TEXT,
     year        INTEGER,
     edition     TEXT,           -- Director's Cut, Final Cut, ...
-    kind        TEXT,           -- movie | episode | extra | sample | unknown
+    kind        TEXT,           -- movie | episode | music | software | extra | sample | unknown
+    season      INTEGER,        -- episodes only; title holds the series name
+    episode     INTEGER,
+    episode_last INTEGER,       -- last episode of a multi-episode file
+    episode_title TEXT,
+    artist      TEXT,           -- music only; title holds the track title
+    album       TEXT,
+    track       INTEGER,
+    disc        INTEGER,        -- set only for multi-disc albums
     source      TEXT,           -- guessit | llm | manual
     confidence  REAL,
     flagged     INTEGER,        -- 1 = needs the LLM / a human
@@ -113,8 +122,16 @@ def connect(db_file: Path) -> sqlite3.Connection:
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("PRAGMA foreign_keys=ON")
     con.executescript(SCHEMA)
-    if "edition" not in {r["name"] for r in con.execute("PRAGMA table_info(parses)")}:
-        con.execute("ALTER TABLE parses ADD COLUMN edition TEXT")
+    for table, cols in (("files", (("tags", "TEXT"),)),
+                        ("parses", (("edition", "TEXT"), ("season", "INTEGER"),
+                                    ("episode", "INTEGER"), ("episode_last", "INTEGER"),
+                                    ("episode_title", "TEXT"), ("artist", "TEXT"),
+                                    ("album", "TEXT"), ("track", "INTEGER"),
+                                    ("disc", "INTEGER")))):
+        have = {r["name"] for r in con.execute(f"PRAGMA table_info({table})")}
+        for col, kind in cols:
+            if col not in have:
+                con.execute(f"ALTER TABLE {table} ADD COLUMN {col} {kind}")
     return con
 
 
