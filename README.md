@@ -32,6 +32,9 @@ ffprobe  guessit   Ollama on     DB only  UI / CLI   rename    inode +
 | `mylib undo --run N` | Dry run; `--execute` reverses a whole run. | renames only |
 
 
+The **Tree** tab shows every folder and file on each root, with totals, and marks what the next
+Apply would move. It uses the same check as the dry run and changes nothing.
+
 **Adult scenes** are recognised from names like `Site.26.06.21.Performer.Title.XXX`, whether the
 file or its release folder carries it, or `[Site] Performer Title (26.10.16)` and
 `Site - Performer - Title (17.05.2026)`, and planned into

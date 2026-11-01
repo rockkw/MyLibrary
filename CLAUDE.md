@@ -19,6 +19,8 @@ overwrite a file.**
   writes decisions to SQLite and launches whitelisted `mylib` CLI jobs.
 - LLM output is a suggestion only (JSON, no tools). Confidence capped at 0.85 so
   LLM-only answers always need human review unless the offline IMDb check confirms.
+- `preflight.py` and `tree.py` are read-only and reachable from the web UI, so they must never
+  import `apply` or `safefs`. `preflight.prepare` is the one check for what a run would do.
 - Duplicates and empty or leftover folders: report only. `mylib leftovers` suggests. Approving
   one moves it aside with `safe_move` into `.mylibrary-safety/run-N/leftovers/`, and undo
   restores it. Never delete it. No Python file may contain the removal command. Snapshot folders
@@ -50,7 +52,7 @@ overwrite a file.**
 
 ## Layout
 ```
-src/mylibrary/   config db scan parse classify imdb plan review apply safefs dupes cli
+src/mylibrary/   config db scan parse classify imdb plan review preflight apply safefs dupes tree cli
 src/mylibrary/web/  Flask UI (MyMagnet look: #111 bg, #f90 amber, three panes)
 tests/           pytest
 infra/compose/   systemd user units (web service, nightly pipeline timer: no renames)

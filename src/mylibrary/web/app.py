@@ -19,7 +19,7 @@ from pathlib import Path
 
 from flask import Flask, abort, jsonify, render_template, request
 
-from mylibrary import config, db, dupes, leftovers, plan, review
+from mylibrary import config, db, dupes, leftovers, plan, review, tree
 
 SRC = Path(__file__).resolve().parents[2]          # .../src
 app = Flask(__name__)
@@ -162,6 +162,11 @@ def api_runs():
     rows = con().execute("""SELECT r.*, (SELECT COUNT(*) FROM moves m WHERE m.run_id=r.id
                             AND m.status='moved') moved FROM runs r ORDER BY id DESC LIMIT 100""")
     return jsonify([dict(r) for r in rows])
+
+
+@app.get("/api/tree")
+def api_tree():
+    return jsonify(tree.build(con(), CFG, hidden=request.args.get("hidden") == "1"))
 
 
 @app.get("/api/leftovers")

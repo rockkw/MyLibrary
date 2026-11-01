@@ -317,10 +317,85 @@ async function loadDupes() {
   $('#dupes').innerHTML = (ex || sm) ? ex + sm : '<p class="empty">No duplicates found.</p>';
 }
 
+// ── tree ── Read only: clicking a file only jumps to its Review entry.
+const TREE_MARKS = {in: ['moving in', 'in'], out: ['moving out', 'out'], decide: ['needs a decision', 'decide'],
+                    skipped: ['skipped', 'quiet'], ignored: ['ignored', 'quiet'], untracked: ['not tracked', 'quiet'],
+                    downloading: ['still downloading', 'off']};
+let treeNodes = [];
+const treeChanged = n => n.type === 'dir' ? n.in + n.out > 0 : ['in', 'out'].includes(n.state);
+const treeRel = p => { const r = state.tree.roots.find(x => p.startsWith(x.path + '/')); return r ? p.slice(r.path.length + 1) : p; };
+const treeFiles = n => Object.values(n.counts).reduce((a, b) => a + b, 0);
+function treeRow(n, open) {
+  const i = treeNodes.push(n) - 1;
+  if (n.type === 'dir') {
+    const delta = `${n.in ? `<span class="t-in">+${n.in}</span>` : ''}${n.out ? `<span class="t-out">−${n.out}</span>` : ''}`;
+    return `<div class="t-dir" data-n="${i}"><div class="t-row t-folder ${n.new ? 't-new' : ''}">
+      <span class="t-arrow">${open ? '▾' : '▸'}</span><span class="t-name">${esc(n.name)}/</span>
+      <span class="n">${treeFiles(n)}</span>${delta}
+      ${n.new ? '<span class="chip">new folder</span>' : ''}
+      ${n.left ? '<span class="chip t-left">left behind</span>' : ''}
+      ${n.error ? `<span class="chip t-left">${esc(n.error)}</span>` : ''}</div>
+      <div class="t-kids">${open ? treeKids(n) : ''}</div></div>`;
+  }
+  const mark = TREE_MARKS[n.state];
+  const detail = n.to || n.from || n.reason || '';
+  return `<div class="t-row t-file ${mark ? 't-' + mark[1] : ''} ${n.proposal_id ? 't-link' : ''}" data-n="${i}" title="${esc(detail)}">
+    <span class="t-name">${esc(n.name)}</span>
+    ${n.size != null ? `<span class="n">${fmtSize(n.size)}</span>` : ''}
+    ${mark ? `<span class="chip">${mark[0]}</span>` : ''}
+    ${n.torrent ? `<span class="chip t-off">in torrent</span>` : ''}
+    ${n.symlink ? '<span class="chip">link</span>' : ''}
+    ${detail ? `<span class="t-why">${esc(n.to ? '→ ' + treeRel(n.to) : n.from ? '← ' + treeRel(n.from) : detail)}</span>` : ''}</div>`;
+}
+const treeAllOpen = () => state.treeOpen ?? $('#tree-changes').checked;
+function treeKids(n) {
+  const only = $('#tree-changes').checked;
+  return n.children.filter(c => !only || treeChanged(c)).map(c => treeRow(c, treeAllOpen() && c.type === 'dir')).join('');
+}
+async function loadTree() {
+  const d = await api('/api/tree' + ($('#tree-hidden').checked ? '?hidden=1' : ''));
+  state.tree = d;
+  const t = d.totals;
+  $('#tree-head').innerHTML = `
+    <div class="t-totals"><span>Video files <b>${t.video}</b></span><span>Music <b>${t.music}</b></span>
+      <span>Software <b>${t.software}</b></span><span>Other <b>${t.other}</b></span>
+      <span>${d.plan_id ? `Plan #${d.plan_id} moves <b>${d.moves}</b>` : 'No plan yet'}</span></div>
+    ${d.stale ? '<p class="t-banner">A scan is newer than this plan, so these changes are out of date. Run the pipeline to rebuild it.</p>' : ''}
+    ${d.error ? `<p class="t-banner">${esc(d.error)}: nothing would move.</p>` : ''}
+    ${d.missing.map(r => `<p class="t-banner">${esc(r)} is not mounted.</p>`).join('')}`;
+  renderTree();
+}
+function renderTree() {
+  treeNodes = [];
+  $('#tree-toggle').textContent = treeAllOpen() ? 'Collapse all' : 'Expand all';
+  $('#tree').innerHTML = (state.tree?.roots || []).map(r => treeRow(r, true)).join('') ||
+    '<p class="empty">No roots to show.</p>';
+}
+$('#tree').onclick = e => {
+  const row = e.target.closest('.t-row');
+  if (!row) return;
+  if (row.classList.contains('t-folder')) {
+    const box = row.parentElement, kids = $('.t-kids', box);
+    const opening = !kids.children.length;
+    kids.innerHTML = opening ? treeKids(treeNodes[+box.dataset.n]) : '';
+    $('.t-arrow', row).textContent = opening ? '▾' : '▸';
+    return;
+  }
+  const n = treeNodes[+row.dataset.n];
+  if (!n.proposal_id) return;
+  state.status = ''; state.root = ''; state.q = base(n.from || n.path); $('#q').value = state.q;
+  location.hash = '#review'; refresh();
+};
+$('#tree-changes').onchange = () => { state.treeOpen = null; renderTree(); };
+$('#tree-toggle').onclick = () => { state.treeOpen = !treeAllOpen(); renderTree(); };
+$('#tree-hidden').onchange = loadTree;
+$('#tree-refresh').onclick = loadTree;
+
 // ── nav + events ──
 function showPage(p) {
   $$('.page').forEach(el => el.classList.toggle('active', el.id === 'page-' + p));
   $$('.nav-link').forEach(el => el.classList.toggle('active', el.dataset.page === p));
+  if (p === 'tree') loadTree();
   if (p === 'runs') loadRuns();
   if (p === 'dupes') loadDupes();
   if (p === 'leftovers') loadLeftovers();

@@ -175,3 +175,25 @@ tr:hover td { background: #1a1a1a; }
 .empty { color: #555; padding: 2rem; text-align: center; font-size: 0.85rem; }
 .chk input { accent-color: #f90; }
 .row input { accent-color: #f90; }
+
+/* Tree */
+.t-totals { display: flex; flex-wrap: wrap; gap: 1.4rem; font-size: 0.85rem; color: #999; margin-bottom: 0.5rem; }
+.t-totals b { color: #f90; }
+.t-banner { background: #2a1f0a; border: 1px solid #f90; color: #fc8; border-radius: 4px; padding: 0.4rem 0.7rem; font-size: 0.8rem; }
+.tree-tools { display: flex; gap: 1.2rem; align-items: center; font-size: 0.8rem; color: #aaa; margin: 0.5rem 0 0.7rem; }
+.t-row { display: flex; gap: 0.5rem; align-items: baseline; padding: 0.12rem 0.3rem; font-family: ui-monospace, monospace; font-size: 0.76rem; color: #ccc; white-space: nowrap; }
+.t-row:hover { background: #1c1c1c; }
+.t-folder { cursor: pointer; color: #eee; }
+.t-link { cursor: pointer; }
+.t-arrow { width: 0.8rem; color: #777; }
+.t-kids { margin-left: 1.1rem; border-left: 1px solid #2a2a2a; padding-left: 0.3rem; }
+.t-row .n { color: #777; }
+.t-why { color: #666; overflow: hidden; text-overflow: ellipsis; }
+.t-in, .t-in .t-name { color: #8d8; }
+.t-out { color: #e77; }
+.t-file.t-out .t-name { color: #777; text-decoration: line-through; }
+.t-decide .t-name { color: #fc8; }
+.t-off, .t-off .t-name { color: #8bf; }
+.t-quiet .t-name { color: #888; }
+.t-new .t-name { color: #8d8; }
+.chip.t-left { color: #fc8; }

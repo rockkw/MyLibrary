@@ -9,12 +9,25 @@
 <body>
 <div id="navbar">
   <h1>📚 MyLibrary</h1>
+  <a class="nav-link" data-page="tree" href="#tree">Tree</a>
   <a class="nav-link active" data-page="review" href="#review">Review</a>
   <a class="nav-link" data-page="runs" href="#runs">Runs</a>
   <a class="nav-link" data-page="dupes" href="#dupes">Duplicates</a>
   <a class="nav-link" data-page="leftovers" href="#leftovers">Leftovers</a>
   <div id="stats-bar"></div>
 </div>
+
+<!-- ── Tree: read only ── -->
+<div id="page-tree" class="page"><div class="pad">
+  <div id="tree-head"></div>
+  <div class="tree-tools">
+    <label class="chk"><input type="checkbox" id="tree-changes"> Only changes</label>
+    <label class="chk"><input type="checkbox" id="tree-hidden"> Show hidden files</label>
+    <button class="btn" id="tree-toggle">Expand all</button>
+    <button class="btn" id="tree-refresh">Refresh</button>
+  </div>
+  <div id="tree"></div>
+</div></div>
 
 <!-- ── Review: three panes ── -->
 <div id="page-review" class="page active">
