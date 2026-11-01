@@ -17,7 +17,7 @@ import fcntl
 import json
 import os
 
-from . import safefs
+from . import downloads, safefs
 from .db import now
 from .scan import SAFETY_DIR, count_files
 
@@ -68,6 +68,7 @@ def prepare(con, cfg, plan_id) -> dict:
                            WHERE pr.plan_id=? AND pr.status IN ('auto','approved')
                            AND pr.dst IS NOT NULL ORDER BY pr.src""", (plan_id,)).fetchall()
     ok, refused, targets = [], [], set()
+    active = downloads.check(cfg)
     for it in items:
         src, dst = it["src"], it["dst"]
         why = None
@@ -75,8 +76,12 @@ def prepare(con, cfg, plan_id) -> dict:
             st = os.lstat(src)
         except FileNotFoundError:
             st, why = None, "source missing (run scan)"
+        if active.error:
+            why = active.error
+        elif src in active.paths:
+            why = "still downloading"
         # Downloaders preallocate, so size alone cannot show that a file is still filling up.
-        if st and (st.st_ino != it["inode"] or st.st_size != it["size"]
+        elif st and (st.st_ino != it["inode"] or st.st_size != it["size"]
                    or abs(st.st_mtime - (it["mtime"] or 0)) >= 1):
             why = "file changed since scan (run scan)"
         elif os.path.lexists(dst):

@@ -85,6 +85,10 @@ class Config:
     imdb_db: Path | None = None
     auto_approve: float = 0.90
     llm_max_conf: float = 0.85
+    transmission_enabled: bool = False
+    transmission_url: str = "http://127.0.0.1:9091/transmission/rpc"
+    transmission_user: str = ""
+    transmission_password: str = ""
     host: str = "127.0.0.1"
     port: int = 5051
     source: Path | None = None
@@ -103,6 +107,10 @@ def load(path: str | os.PathLike | None = None) -> Config:
         return expand(cp.get(sec, key, fallback=default)).strip()
 
     imdb = get("imdb", "db_file")
+    # Taken literally so a "$" in a password survives; ${VAR} reads it from the environment.
+    password = cp.get("transmission", "password", fallback="").strip()
+    if password.startswith("${"):
+        password = expand(password)
     return Config(
         db_file=Path(get("paths", "db_file", "${HOME}/.mylibrary/inventory.db")),
         log_dir=Path(get("paths", "log_dir", "${HOME}/.mylibrary/logs")),
@@ -135,6 +143,10 @@ def load(path: str | os.PathLike | None = None) -> Config:
         imdb_db=Path(imdb) if imdb else None,
         auto_approve=float(get("thresholds", "auto_approve", "0.90")),
         llm_max_conf=float(get("thresholds", "llm_max_confidence", "0.85")),
+        transmission_enabled=get("transmission", "enabled", "false").lower() in ("1", "true", "yes"),
+        transmission_url=get("transmission", "url", "http://127.0.0.1:9091/transmission/rpc"),
+        transmission_user=get("transmission", "user"),
+        transmission_password=password,
         host=get("server", "host", "127.0.0.1"),
         port=int(get("server", "port", "5051")),
         source=path if path.exists() else None,

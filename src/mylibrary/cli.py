@@ -25,7 +25,7 @@ import argparse
 import json
 import sys
 
-from . import __version__, apply as applymod, classify, config, db, dupes, imdb
+from . import __version__, apply as applymod, classify, config, db, downloads, dupes, imdb
 from . import parse, plan, review, scan
 
 
@@ -133,6 +133,9 @@ def main(argv=None):
         res["config"] = str(cfg.source)
         res["db"] = str(cfg.db_file)
         res["imdb"] = imdb.available(con)
+        active = downloads.check(cfg)
+        res["downloads"] = {"checked": cfg.transmission_enabled, "error": active.error,
+                            "unfinished_torrents": active.torrents}
         log(json.dumps(res, indent=2))
     elif a.cmd == "dupes":
         res = dupes.find(con)

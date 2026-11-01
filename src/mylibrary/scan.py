@@ -7,6 +7,7 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from . import downloads
 from .config import has_ext
 from .db import now
 
@@ -84,7 +85,10 @@ def count_files(root: Path) -> int:
 def scan(con, cfg, roots=None, log=print, workers=4) -> dict:
     roots = [Path(r) for r in (roots or cfg.roots)]
     stats = {"roots": [], "new": 0, "changed": 0, "unchanged": 0,
-             "missing": 0, "skipped_roots": []}
+             "missing": 0, "skipped_roots": [], "downloading": 0}
+    active = downloads.check(cfg)
+    if active.error:
+        log(f"WARN {active.error}; nothing will auto-approve or apply")
     for root in roots:
         if not root.is_dir():
             log(f"WARN root not mounted / not found, skipping: {root}")
@@ -97,6 +101,9 @@ def scan(con, cfg, roots=None, log=print, workers=4) -> dict:
         wanted = cfg.video_ext | cfg.audio_ext | cfg.software_ext
         for path in iter_media(root, wanted):
             seen.add(path)
+            if path in active.paths:  # picked up by a later scan once it finishes
+                stats["downloading"] += 1
+                continue
             st = os.stat(path)
             k = known.get(path)
             if k and k["inode"] == st.st_ino and k["size"] == st.st_size \
@@ -105,7 +112,8 @@ def scan(con, cfg, roots=None, log=print, workers=4) -> dict:
                 continue
             stats["changed" if k else "new"] += 1
             todo.append((path, st))
-        log(f"{root}: {len(seen)} media files, {len(todo)} to probe")
+        log(f"{root}: {len(seen)} media files, {len(todo)} to probe, "
+            f"{stats['downloading']} still downloading")
 
         def work(item):
             path, st = item

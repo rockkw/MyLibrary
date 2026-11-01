@@ -50,6 +50,15 @@ timeout = 120
 ; https://datasets.imdbws.com/ once, then run  mylib imdb-import title.basics.tsv.gz
 ; (stored in the same inventory.db; lookups are fully offline afterward)
 
+; Optional. Files in an unfinished torrent are skipped until it finishes, and if this is
+; enabled but cannot be reached, nothing auto-approves or applies. Keep this file private.
+; password is taken literally; use ${TRANSMISSION_PASSWORD} to read it from the environment.
+[transmission]
+enabled = false
+url = http://127.0.0.1:9091/transmission/rpc
+user =
+password =
+
 [thresholds]
 ; Proposals at or above this confidence are auto-approved.
 auto_approve = 0.90

@@ -3,11 +3,12 @@ import json
 import os
 import sqlite3
 import time
+import urllib.error
 
 import pytest
 
 from conftest import tree_digest
-from mylibrary import apply, classify, db, dupes, parse, plan, review, scan
+from mylibrary import apply, classify, config, db, downloads, dupes, parse, plan, review, scan
 
 
 def run_to_plan(lib):
@@ -809,4 +810,157 @@ def test_apply_refuses_preallocated_file_written_since_scan(lib):
     res = apply.apply_plan(con, cfg, plan.current_plan(con), execute=False, log=lambda *a: None)
     assert any("changed since scan" in r["reason"] for r in res["refused"])
     assert src.exists()
+
+
+# Transmission
+
+class FakeRPC:
+    """Speaks Transmission's session-id handshake, then answers torrent-get."""
+
+    def __init__(self, torrents):
+        self.torrents, self.requests = torrents, []
+
+    def __call__(self, req, timeout):
+        self.requests.append(req)
+        if req.get_header("X-transmission-session-id") != "abc":
+            raise urllib.error.HTTPError(req.full_url, 409, "Conflict",
+                                         {"X-Transmission-Session-Id": "abc"}, io.BytesIO())
+        body = {"result": "success", "arguments": {"torrents": self.torrents}}
+        return FakeResp(json.dumps(body).encode())
+
+
+def torrent(lib, name, left=0, done=None, **extra):
+    done = {} if done is None else done
+    files = [{"name": n, "length": 10, "bytesCompleted": done.get(n, 10)} for n in name]
+    return {"name": "T", "downloadDir": str(lib["root"]), "files": files, "leftUntilDone": left,
+            "percentDone": 0 if left else 1, "metadataPercentComplete": 1, "status": 4, **extra}
+
+
+REAL_CHECK = downloads.check
+
+
+def transmission(lib, monkeypatch, torrents=None, error=None):
+    lib["cfg"].transmission_enabled = True
+    def fake(cfg, opener=None):
+        if error:
+            return downloads.Active(error=error)
+        return REAL_CHECK(cfg, opener=FakeRPC(torrents))
+    monkeypatch.setattr(downloads, "check", fake)
+
+
+def test_disabled_client_is_never_contacted(lib):
+    def boom(req, timeout):
+        raise AssertionError("contacted")
+    assert downloads.check(lib["cfg"], opener=boom) == downloads.Active()
+
+
+def test_handshake_and_login_are_sent(lib):
+    cfg = lib["cfg"]
+    cfg.transmission_enabled, cfg.transmission_user, cfg.transmission_password = True, "u", "p"
+    rpc = FakeRPC([])
+    assert downloads.check(cfg, opener=rpc).error is None
+    assert len(rpc.requests) == 2
+    assert rpc.requests[1].get_header("Authorization") == "Basic dTpw"
+
+
+@pytest.mark.parametrize("change", [
+    {"left": 5}, {"status": 2}, {"metadataPercentComplete": 0.5}])
+def test_whole_torrent_counts_until_it_finishes(lib, change):
+    lib["cfg"].transmission_enabled = True
+    t = torrent(lib, ["a/1.mkv", "a/2.mkv"], **change)
+    res = downloads.check(lib["cfg"], opener=FakeRPC([t]))
+    assert res.paths == {str(lib["root"] / "a/1.mkv"), str(lib["root"] / "a/2.mkv")}
+
+
+def test_partial_file_counts_even_if_torrent_says_done(lib):
+    lib["cfg"].transmission_enabled = True
+    t = torrent(lib, ["1.mkv"], done={"1.mkv": 3})
+    assert downloads.check(lib["cfg"], opener=FakeRPC([t])).paths
+
+
+def test_finished_seeding_torrent_is_free_to_process(lib):
+    lib["cfg"].transmission_enabled = True
+    assert not downloads.check(lib["cfg"], opener=FakeRPC([torrent(lib, ["1.mkv"])])).paths
+
+
+def test_paused_unfinished_torrent_still_counts(lib):
+    lib["cfg"].transmission_enabled = True
+    t = torrent(lib, ["1.mkv"], left=5, status=0)
+    assert downloads.check(lib["cfg"], opener=FakeRPC([t])).paths
+
+
+def test_login_failure_is_an_error_without_the_password(lib):
+    cfg = lib["cfg"]
+    cfg.transmission_enabled, cfg.transmission_password = True, "hunter2"
+    def refuse(req, timeout):
+        raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", {}, io.BytesIO())
+    res = downloads.check(cfg, opener=refuse)
+    assert "login refused" in res.error and "hunter2" not in res.error
+
+
+def test_unreachable_client_is_an_error(lib):
+    lib["cfg"].transmission_enabled = True
+    def down(req, timeout):
+        raise urllib.error.URLError("connection refused")
+    assert "cannot check downloads" in downloads.check(lib["cfg"], opener=down).error
+
+
+def test_unfinished_file_is_not_scanned_then_arrives_when_done(lib, monkeypatch):
+    con = lib["con"]
+    add_files(lib, "dl/Show.S01E01.mkv")
+    transmission(lib, monkeypatch, [torrent(lib, ["dl/Show.S01E01.mkv"], left=5)])
+    res = scan.scan(con, lib["cfg"], log=lambda *a: None)
+    assert res["downloading"] == 1
+    assert not con.execute("SELECT 1 FROM files WHERE path LIKE '%Show%'").fetchone()
+    transmission(lib, monkeypatch, [torrent(lib, ["dl/Show.S01E01.mkv"])])
+    run_to_plan(lib)
+    assert proposal(con, "Show.S01E01")["status"] == "auto"
+
+
+def test_known_file_back_in_a_torrent_is_ignored_and_not_marked_missing(lib, monkeypatch):
+    con = lib["con"]
+    add_files(lib, "dl/Show.S01E01.mkv")
+    run_to_plan(lib)
+    transmission(lib, monkeypatch, [torrent(lib, ["dl/Show.S01E01.mkv"], left=5)])
+    run_to_plan(lib)
+    p = proposal(con, "Show.S01E01")
+    assert p["status"] == "ignored" and "still downloading" in p["reason"]
+    assert con.execute("SELECT missing FROM files WHERE path LIKE '%Show%'").fetchone()[0] == 0
+
+
+def test_apply_refuses_a_file_that_started_downloading_after_the_plan(lib, monkeypatch):
+    con, cfg = lib["con"], lib["cfg"]
+    add_files(lib, "dl/Show.S01E01.mkv")
+    run_to_plan(lib)
+    src = lib["root"] / "dl/Show.S01E01.mkv"
+    transmission(lib, monkeypatch, [torrent(lib, ["dl/Show.S01E01.mkv"], left=5)])
+    res = apply.apply_plan(con, cfg, plan.current_plan(con), execute=True, log=lambda *a: None)
+    assert [r["reason"] for r in res["refused"]] == ["still downloading"]
+    assert src.exists()
+
+
+def test_unknown_download_state_stops_auto_and_apply(lib, monkeypatch):
+    con, cfg = lib["con"], lib["cfg"]
+    add_files(lib, "dl/Show.S01E01.mkv")
+    run_to_plan(lib)
+    pid = proposal(con, "Show.S01E01")["id"]
+    review.decide(con, [pid], "approve")
+    transmission(lib, monkeypatch, error="cannot check downloads (down)")
+    before = tree_digest(lib["root"])
+    res = apply.apply_plan(con, cfg, plan.current_plan(con), execute=True, log=lambda *a: None)
+    assert res["count"] == 0 and res["refused"]
+    assert all("cannot check downloads" in r["reason"] for r in res["refused"])
+    assert tree_digest(lib["root"]) == before
+    run_to_plan(lib)
+    assert not lib["con"].execute("SELECT 1 FROM proposals WHERE status='auto' AND plan_id="
+                                  "(SELECT MAX(id) FROM plans)").fetchone()
+
+
+def test_password_with_dollar_stays_literal_and_env_form_expands(tmp_path, monkeypatch):
+    ini = tmp_path / "c.ini"
+    ini.write_text("[transmission]\nenabled = true\npassword = pa$$word\n")
+    assert config.load(ini).transmission_password == "pa$$word"
+    monkeypatch.setenv("TX_PW", "from-env")
+    ini.write_text("[transmission]\npassword = ${TX_PW}\n")
+    assert config.load(ini).transmission_password == "from-env"
 

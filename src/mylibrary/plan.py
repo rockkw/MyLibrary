@@ -5,7 +5,7 @@ import os
 import re
 import time
 
-from . import imdb
+from . import downloads, imdb
 from .db import now
 
 BAD_CHARS = re.compile(r'[<>"/\\|?*\x00-\x1f]')
@@ -147,12 +147,17 @@ def make_plan(con, cfg, note="", log=print) -> dict:
                           FROM files f JOIN parses p ON p.file_id=f.id
                           WHERE f.missing=0 ORDER BY f.path""").fetchall()
     claimed, counts = {}, {}
+    active = downloads.check(cfg)
+    if active.error:
+        log(f"WARN {active.error}; everything goes to review")
     for r in rows:
         dst = destination(cfg, r, r)
         conf, notes, im = score(con, cfg, r, r)
         if im.get("tconst"):
             con.execute("UPDATE parses SET imdb_id=? WHERE file_id=?", (im["tconst"], r["id"]))
-        if r["kind"] in ("sample", "extra"):
+        if r["path"] in active.paths:
+            status, notes = "ignored", notes + ["still downloading"]
+        elif r["kind"] in ("sample", "extra"):
             status, notes = "ignored", notes + [f"kind={r['kind']}"]
         elif not dst:
             status, notes = "review", notes + [needs(r["kind"])]
@@ -167,6 +172,8 @@ def make_plan(con, cfg, note="", log=print) -> dict:
             notes.append("decision carried over from previous plan")
         elif r["source"] == "manual":
             status = "approved"
+        elif active.error:
+            status, notes = "review", notes + [active.error]
         elif time.time() - (r["mtime"] or 0) < cfg.settle_minutes * 60:
             status, notes = "review", notes + ["changed recently: may still be downloading"]
         elif r["kind"] == "software" and r["source"] == "llm":

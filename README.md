@@ -45,9 +45,13 @@ never opened or run. Only an installer with a clear name and version can be auto
 archives, ISOs and titles suggested by the LLM always need review. Each ISO stays a
 film or becomes software from the signs in its name, and unclear ones go to review.
 
-**Downloads in progress:** a file changed within `settle_minutes` (default 10) goes to
-review instead of auto, and `apply` refuses any file whose modified time changed since
-the scan. Moving a file a torrent client is still using can make it download again, so
+**Downloads in progress:** with `[transmission]` enabled, every file in an unfinished
+torrent is skipped by the scan, ignored by the plan, and refused by `apply`, even when
+paused or stalled, and it is picked up once the torrent finishes. If Transmission cannot
+be reached, nothing auto-approves or applies until it can. `mylib status` shows what is
+unfinished. As a backstop for any other downloader, a file changed within `settle_minutes`
+(default 10) goes to review, and `apply` refuses any file whose modified time changed
+since the scan. Moving a file a torrent client is still using can make it download again, so
 finish or pause downloads first, and expect seeding to stop for renamed files.
 
 **TV episodes** are recognised by `S01E04`-style names and planned into `tv_dir`

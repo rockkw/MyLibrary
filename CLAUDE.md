@@ -27,6 +27,9 @@ overwrite a file.**
   they reach file paths, so every part goes through `plan.clean`.
 - Software files are never probed, opened, or run. Only installers with a clear name and
   version can be auto; archives, ISOs, and LLM-suggested titles always need review.
+- Unfinished torrents are off limits, finished files in them included. `downloads.check`
+  is read-only; its `.error` means unknown, so nothing auto-approves or applies. Never log
+  the Transmission password.
 - When testing on real media: dry run first (`mylib apply` without `--execute`).
   Never run `--execute` or `undo --execute` on real drives without Rock's explicit OK.
 
