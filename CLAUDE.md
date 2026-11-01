@@ -27,6 +27,8 @@ overwrite a file.**
   have no target and go to review; multi-episode files always go to review.
 - Music identity comes only from embedded tags and skips the LLM. Tags are untrusted input:
   they reach file paths, so every part goes through `plan.clean`.
+- `parse.group_albums` runs after every parse, so compilation and disc-folder rules need no
+  `--redo`. A release is a folder; only an album artist on every track outranks detection.
 - Software files are never probed, opened, or run. Only installers with a clear name and
   version can be auto; archives, ISOs, and LLM-suggested titles always need review.
 - Unfinished torrents are off limits, finished files in them included. `downloads.check`

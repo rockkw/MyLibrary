@@ -8,6 +8,7 @@ import json
 import os
 import re
 import string
+from collections import Counter, defaultdict
 
 from guessit import guessit
 
@@ -222,9 +223,9 @@ def identify_music(tags: dict) -> dict:
     Filenames are not trusted here. Tracks skip the LLM: a wrong artist is worse than
     a file left for review. Album artist wins so a guest verse stays in the same folder.
     """
-    artist = _tag_text(tags, "album_artist", "albumartist", "album artist")
+    artist = _tag_text(tags, *ALBUM_ARTIST_KEYS)
     if not artist and str(tags.get("compilation") or "").lower() in ("1", "true", "yes"):
-        artist = "Various Artists"
+        artist = VARIOUS
     artist = artist or _tag_text(tags, "artist")
     album, title = _tag_text(tags, "album"), _tag_text(tags, "title")
     track, _ = _tag_number(tags, "track", "tracknumber")
@@ -245,6 +246,84 @@ def identify_music(tags: dict) -> dict:
         "disc": disc if (discs or 0) > 1 or (disc or 0) > 1 else None,
         "confidence": conf, "flagged": 0, "reasons": "; ".join(reasons), "guessit": {},
     }
+
+
+VARIOUS = "Various Artists"
+DISC_FOLDER = re.compile(r"(?:cd|dis[ck])[\s._-]*(\d+)$", re.I)
+PLACED_DISC = re.compile(r"(\d+)-\d+ - ")
+GUEST = re.compile(r"\s*(?:[(\[]?\b(?:feat|ft|featuring|with)\b\.?|[,&;/+]|\sx\s|\sand\s).*$", re.I)
+ALBUM_ARTIST_KEYS = ("album_artist", "albumartist", "album artist")
+
+
+def _primary_artist(artist: str) -> str:
+    return GUEST.sub("", artist or "").strip().casefold()
+
+
+def _is_compilation(rows: list, cfg) -> bool:
+    """True when an album's tracks have no shared artist.
+
+    An album artist on every track wins, but a partial or mixed one proves nothing: the
+    Billboard set in the first real library has 34 untagged tracks beside per-track ones.
+    Guests do not count, so a solo album with features stays with its artist.
+    """
+    placed = os.path.join(cfg.music_dir, VARIOUS) + os.sep
+    if any(placed in r["path"] for r in rows):
+        return True
+    shared = {_tag_text(json.loads(r["tags"] or "{}"), *ALBUM_ARTIST_KEYS) for r in rows}
+    if len(shared) == 1 and None not in shared:
+        return False
+    artists = Counter(_primary_artist(r["artist"]) for r in rows if r["artist"])
+    return len(artists) >= 3 and artists.most_common(1)[0][1] <= len(rows) / 2
+
+
+def _main_artist(rows: list) -> str | None:
+    """The artist behind most tracks, in its plainest spelling, or None if no one leads."""
+    named = [r["artist"] for r in rows if r["artist"]]
+    if not named:
+        return None
+    top, count = Counter(map(_primary_artist, named)).most_common(1)[0]
+    return min((a for a in named if _primary_artist(a) == top), key=len) \
+        if count > len(rows) / 2 else None
+
+
+def _disc_of(row, folders_per_disc: int, cfg) -> int | None:
+    folder = DISC_FOLDER.search(os.path.basename(os.path.dirname(row["path"])))
+    if folder and folders_per_disc > 1:
+        return int(folder[1])
+    placed = PLACED_DISC.match(os.path.basename(row["path"]))
+    in_library = f"{os.sep}{cfg.music_dir}{os.sep}" in row["path"]
+    return int(placed[1]) if placed and in_library else None
+
+
+def group_albums(con, cfg) -> int:
+    """Settle what one track cannot show alone: compilations and disc folders.
+
+    Runs over already scanned tracks after each parse. A release is a folder, with
+    CD1 and DISC 2 style folders counted as one, so same-named albums stay apart.
+    """
+    releases = defaultdict(list)
+    for r in con.execute("""SELECT f.id, f.path, f.tags, p.artist, p.album, p.disc FROM parses p
+                            JOIN files f ON f.id=p.file_id WHERE f.missing=0 AND p.kind='music'
+                            AND p.source='guessit' AND p.album IS NOT NULL"""):
+        folder = os.path.dirname(r["path"])
+        releases[os.path.dirname(folder) if DISC_FOLDER.search(folder) else folder].append(r)
+    changed = 0
+    for tracks in releases.values():
+        names = Counter(r["album"] for r in tracks).most_common()
+        albums = defaultdict(list)
+        for r in tracks:  # a cut-off tag belongs with the full album name
+            albums[next((n for n, _ in names if n.startswith(r["album"])), r["album"])].append(r)
+        for album, rows in albums.items():
+            main = VARIOUS if _is_compilation(rows, cfg) else _main_artist(rows)
+            folders = len({os.path.dirname(r["path"]) for r in rows})
+            for r in rows:
+                artist = main or r["artist"]
+                disc = r["disc"] or _disc_of(r, folders, cfg)
+                if (artist, album, disc) != (r["artist"], r["album"], r["disc"]):
+                    con.execute("UPDATE parses SET artist=?, album=?, disc=? WHERE file_id=?",
+                                (artist, album, disc, r["id"]))
+                    changed += 1
+    return changed
 
 
 def _software_title(stem: str) -> tuple[str, bool]:
@@ -357,6 +436,8 @@ def parse_all(con, cfg, redo=False, log=print) -> dict:
               info["flagged"], info["reasons"], json.dumps(info["guessit"]), now()))
         stats["parsed"] += 1
         stats["flagged"] += info["flagged"]
+    stats["album_updates"] = group_albums(con, cfg)
     con.commit()
-    log(f"parsed {stats['parsed']} files, {stats['flagged']} flagged for the LLM")
+    log(f"parsed {stats['parsed']} files, {stats['flagged']} flagged for the LLM, "
+        f"{stats['album_updates']} tracks grouped into albums")
     return stats

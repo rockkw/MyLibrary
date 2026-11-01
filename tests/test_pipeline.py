@@ -1188,3 +1188,147 @@ def test_clean_through_cli(lib):
     cli.main(args + ["--execute"])
     assert not folder.exists()
 
+
+# Compilations
+
+def track(artist, n, album="Mix", **extra):
+    return {"artist": artist, "album": album, "title": f"Song {n}", "track": str(n), **extra}
+
+
+def album_dsts(lib, like="rel/"):
+    rows = lib["con"].execute("SELECT src, dst, status FROM proposals WHERE plan_id="
+                              "(SELECT MAX(id) FROM plans) AND src LIKE ?", (f"%{like}%",))
+    return {os.path.basename(r["src"]): r for r in rows}
+
+
+def load_album(lib, monkeypatch, tracks, folder="rel"):
+    names = {f"t{i}.mp3": t for i, t in enumerate(tracks, 1)}
+    probe_with(monkeypatch, names)
+    add_files(lib, *(f"{folder}/{n}" for n in names))
+    return names
+
+
+def test_many_artists_go_under_various_artists(lib, monkeypatch):
+    load_album(lib, monkeypatch, [track(f"Artist {i}", i) for i in range(1, 6)])
+    run_to_plan(lib)
+    dsts = album_dsts(lib)
+    assert all("/Music/Various Artists/Mix/" in r["dst"] for r in dsts.values())
+    assert dsts["t2.mp3"]["dst"].endswith("Various Artists/Mix/02 - Song 2.mp3")
+    assert {r["status"] for r in dsts.values()} == {"auto"}
+
+
+def test_solo_album_with_guests_stays_with_its_artist(lib, monkeypatch):
+    artists = ["Drake", "Drake feat. Rihanna", "Drake ft. Future", "Drake & Nicki", "Drake, Jay-Z"]
+    load_album(lib, monkeypatch, [track(a, i) for i, a in enumerate(artists, 1)])
+    run_to_plan(lib)
+    assert all("/Music/Drake/Mix/" in r["dst"] for r in album_dsts(lib).values())
+
+
+def test_album_artist_on_every_track_wins(lib, monkeypatch):
+    tracks = [track(f"Artist {i}", i, album_artist="The Curator") for i in range(1, 6)]
+    load_album(lib, monkeypatch, tracks)
+    run_to_plan(lib)
+    assert all("/Music/The Curator/Mix/" in r["dst"] for r in album_dsts(lib).values())
+
+
+def test_partial_album_artist_tags_do_not_scatter_the_album(lib, monkeypatch):
+    tracks = [track(f"Artist {i}", i) for i in range(1, 5)]
+    tracks += [track("Dua Lipa", 5, album_artist="Dua Lipa"),
+               track("Migos", 6, album_artist="Various Artists")]
+    load_album(lib, monkeypatch, tracks)
+    run_to_plan(lib)
+    assert all("/Music/Various Artists/Mix/" in r["dst"] for r in album_dsts(lib).values())
+
+
+def test_cut_off_album_tag_joins_the_full_album(lib, monkeypatch):
+    tracks = [track(f"A{i}", i, album="Billboard Hot 100 Singles Chart") for i in range(1, 5)]
+    tracks.append(track("A9", 9, album="Billboard Hot 100 Singles Char"))
+    load_album(lib, monkeypatch, tracks)
+    run_to_plan(lib)
+    assert all("Various Artists/Billboard Hot 100 Singles Chart/" in r["dst"]
+               for r in album_dsts(lib).values())
+
+
+def test_two_artists_are_not_a_compilation(lib, monkeypatch):
+    load_album(lib, monkeypatch, [track("A", 1), track("B", 2), track("A", 3), track("B", 4)])
+    run_to_plan(lib)
+    assert not any("Various Artists" in r["dst"] for r in album_dsts(lib).values())
+
+
+def test_same_album_name_in_two_releases_is_not_merged(lib, monkeypatch):
+    tags = {"a.mp3": track("Abba", 1, album="Greatest Hits"),
+            "b.mp3": track("Queen", 1, album="Greatest Hits"),
+            "c.mp3": track("Rush", 1, album="Greatest Hits")}
+    probe_with(monkeypatch, tags)
+    add_files(lib, "one/a.mp3", "two/b.mp3", "three/c.mp3")
+    run_to_plan(lib)
+    con = lib["con"]
+    assert "/Music/Abba/Greatest Hits/" in proposal(con, "one/a.mp3")["dst"]
+    assert "/Music/Queen/Greatest Hits/" in proposal(con, "two/b.mp3")["dst"]
+
+
+@pytest.mark.parametrize("first,second", [("CD1", "CD2"), ("DISC 1", "DISC 2"), ("Disk.1", "Disk.2")])
+def test_disc_folders_stop_track_number_collisions(lib, monkeypatch, first, second):
+    tags = {"a.mp3": track("A", 1), "b.mp3": track("B", 2), "c.mp3": track("C", 1),
+            "d.mp3": track("D", 2)}
+    probe_with(monkeypatch, tags)
+    add_files(lib, f"rel/{first}/a.mp3", f"rel/{first}/b.mp3",
+              f"rel/{second}/c.mp3", f"rel/{second}/d.mp3")
+    run_to_plan(lib)
+    dsts = album_dsts(lib)
+    assert dsts["a.mp3"]["dst"].endswith("Various Artists/Mix/1-01 - Song 1.mp3")
+    assert dsts["c.mp3"]["dst"].endswith("Various Artists/Mix/2-01 - Song 1.mp3")
+    assert {r["status"] for r in dsts.values()} == {"auto"}
+
+
+def test_single_cd_folder_adds_no_disc(lib, monkeypatch):
+    probe_with(monkeypatch, {"a.mp3": track("A", 1)})
+    add_files(lib, "rel/CD1/a.mp3")
+    run_to_plan(lib)
+    assert album_dsts(lib)["a.mp3"]["dst"].endswith("Music/A/Mix/01 - Song 1.mp3")
+
+
+def test_detection_needs_no_redo_for_tracks_already_parsed(lib, monkeypatch):
+    con, cfg = lib["con"], lib["cfg"]
+    load_album(lib, monkeypatch, [track(f"Artist {i}", i) for i in range(1, 6)])
+    run_to_plan(lib)
+    con.execute("UPDATE parses SET artist='Artist ' || file_id WHERE kind='music'")
+    parse.parse_all(con, cfg, log=quiet)
+    plan.make_plan(con, cfg, log=quiet)
+    assert all("Various Artists" in r["dst"] for r in album_dsts(lib).values())
+
+
+def test_manual_edit_of_a_compilation_track_is_kept(lib, monkeypatch):
+    con, cfg = lib["con"], lib["cfg"]
+    load_album(lib, monkeypatch, [track(f"Artist {i}", i) for i in range(1, 6)])
+    run_to_plan(lib)
+    pid = proposal(con, "rel/t1.mp3")["id"]
+    review.edit(con, cfg, pid, "Song 1", None, artist="My Choice")
+    run_to_plan(lib)
+    assert "/Music/My Choice/Mix/" in proposal(con, "rel/t1.mp3")["dst"]
+
+
+def test_moved_compilation_stays_put_even_after_redo(lib, monkeypatch):
+    con, cfg = lib["con"], lib["cfg"]
+    tags = {"a.mp3": track("A", 1), "b.mp3": track("B", 1), "c.mp3": track("C", 2)}
+    tags.update({"1-01 - Song 1.mp3": tags["a.mp3"], "2-01 - Song 1.mp3": tags["b.mp3"],
+                 "2-02 - Song 2.mp3": tags["c.mp3"]})
+    probe_with(monkeypatch, tags)
+    add_files(lib, "rel/CD1/a.mp3", "rel/CD2/b.mp3", "rel/CD2/c.mp3")
+    run_to_plan(lib)
+    apply.apply_plan(con, cfg, plan.current_plan(con), execute=True, log=quiet)
+    assert (lib["root"] / "Music/Various Artists/Mix/2-02 - Song 2.mp3").exists()
+    reparse(lib)
+    rows = con.execute("SELECT status FROM proposals WHERE plan_id=(SELECT MAX(id) FROM plans) "
+                       "AND src LIKE '%Various Artists%'").fetchall()
+    assert [r["status"] for r in rows] == ["noop"] * 3
+
+
+def test_part_of_a_compilation_moved_alone_stays_put(lib, monkeypatch):
+    con, cfg = lib["con"], lib["cfg"]
+    tags = {"01 - Song 1.mp3": track("A", 1)}
+    probe_with(monkeypatch, tags)
+    add_files(lib, "Music/Various Artists/Mix/01 - Song 1.mp3")
+    reparse(lib)
+    assert proposal(con, "Various Artists")["status"] == "noop"
+

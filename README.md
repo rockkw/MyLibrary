@@ -35,7 +35,8 @@ ffprobe  guessit   Ollama on     DB only  UI / CLI   rename    inode +
 **Music** is identified only from embedded tags (album artist first) and planned into
 `music_dir` using `music_layout`. Tracks skip the LLM. Missing artist, album or title
 means no target until reviewed, and a missing track number also needs review.
-Placeholder tags such as "Unknown Artist" count as missing. Only the audio file moves:
+An album whose tracks share no artist goes to `Various Artists`, unless every track has
+the same album artist, and `CD1` or `DISC 2` folders set the disc number. Placeholder tags such as "Unknown Artist" count as missing. Only the audio file moves:
 cover art and other album files stay behind unless they share its stem and extension
 is in `sidecar_extensions`.
 
