@@ -9,6 +9,7 @@ import os
 import re
 import string
 from collections import Counter, defaultdict
+from datetime import date, timedelta
 
 from guessit import guessit
 
@@ -326,6 +327,151 @@ def group_albums(con, cfg) -> int:
     return changed
 
 
+SCENE_DOTTED = re.compile(r"^([a-z0-9][\w-]*)\.(?:(\d{2})\.(\d{2})\.(\d{2})|((?:19|20)\d{2}))(?=\.)"
+                          r"(.*?)\.*(?:\.xxx\b|\.\d{3,4}p\b|$)", re.I)
+SCENE_MARK = re.compile(r"\bxxx\b", re.I)
+SCENE_DATE = r"\((\d{2})\.(\d{2})\.(\d{2}|\d{4})\)"
+SCENE_BRACKET = re.compile(rf"^\[([^\]]+)\]\s*(.+?)\s*{SCENE_DATE}", re.I)
+SCENE_DASHED = re.compile(rf"^(\S+) - (.+?)\s*{SCENE_DATE}", re.I)
+SCENE_PLACED = re.compile(r"^(.+?) - (\d{4}-\d{2}-\d{2})(?: - (.+?))??(?: - (.+?))?(?: - \d{3,4}p)?$")
+STAGE_NAME = re.compile(r"\d|[a-z][A-Z]")
+
+
+def _real_date(y: int, m: int, d: int) -> str | None:
+    """An ISO date, or None if impossible or still to come. A guess never passes as a date."""
+    try:
+        when = date(y, m, d)
+    except ValueError:
+        return None
+    return when.isoformat() if when <= date.today() + timedelta(days=1) else None
+
+
+def _bracket_date(a: str, b: str, c: str) -> str | None:
+    """(17.05.2026) is day first, (26.10.16) is year first, in every real file so far."""
+    return _real_date(int(c), int(b), int(a)) if len(c) == 4 else _real_date(2000 + int(a), int(b), int(c))
+
+
+def _people_and_title(words: list[str]) -> tuple[str | None, str | None]:
+    """Split "Kat Perfect And Ann Lee New Girls" with no separator to go on.
+
+    Names are usually two words, joined by And. A wrong guess moves a dash, not any words.
+    """
+    prefix = []
+    if len(words) > 1 and words[0].casefold() == "episode" and words[1].isdigit():
+        prefix, words = words[:2], words[2:]
+    people, i = [], 0
+    while i < len(words):
+        size = 1 if STAGE_NAME.search(words[i]) or i + 1 == len(words) else 2
+        people.append(" ".join(words[i:i + size]))
+        i += size
+        if i < len(words) and words[i].casefold() == "and":
+            i += 1
+        elif not (i + 2 < len(words) and words[i + 2].casefold() == "and"):
+            break  # "Ann Lee Kim Roe And Sue Poe" lists three people
+    return ", ".join(people) or None, " ".join(prefix + words[i:]) or None
+
+
+def _spoken(text: str) -> tuple[str | None, str | None]:
+    """Split the part of a named scene that follows the site."""
+    text = text.strip(" -")
+    if " - " in text:
+        people, title = text.split(" - ", 1)
+        return people.strip(), title.strip() or None
+    if "," in text:
+        return text, None
+    return _people_and_title(text.split())
+
+
+def _titled(text: str | None) -> str | None:
+    return string.capwords(text) if text and text.islower() else text
+
+
+def scene_from_name(name: str) -> dict | None:
+    """Read a file stem or folder name. Returns the scene fields, or None if it is not one."""
+    m = SCENE_DOTTED.match(name)
+    if m and SCENE_MARK.search(name):
+        when = _real_date(2000 + int(m[2]), int(m[3]), int(m[4])) if m[2] else None
+        people, title = _people_and_title([w for w in m[6].split(".") if w])
+        return {"site": m[1], "scene_date": when, "performers": people, "title": title,
+                "year": int(when[:4]) if when else int(m[5]) if m[5] else None, "marked": True}
+    m = SCENE_BRACKET.match(name) or SCENE_DASHED.match(name)
+    if m:
+        when = _bracket_date(m[3], m[4], m[5])
+        people, title = _spoken(m[2])
+        return {"site": m[1].strip(), "scene_date": when, "performers": people, "title": title,
+                "year": int(when[:4]) if when else None, "marked": False}
+    return None
+
+
+def scene_placed(stem: str) -> dict | None:
+    m = SCENE_PLACED.match(stem)
+    return m and {"site": m[1], "scene_date": m[2], "performers": m[3] or m[4],
+                  "title": m[4] if m[3] else None, "year": int(m[2][:4]), "marked": True}
+
+
+def identify_scene(path: str, origin: str | None, cfg) -> dict | None:
+    """Identify a scene from its original name. The release folder spells the site best."""
+    name = os.path.basename(path)
+    if any(re.search(rf"\b{re.escape(w)}\b", name.lower()) for w in cfg.ignore_words):
+        return None
+    if f"{os.sep}{cfg.adult_dir}{os.sep}" in path and not origin:
+        placed = scene_placed(os.path.splitext(name)[0])
+        if placed:
+            return {**placed, "kind": "scene", "confidence": 0.95, "flagged": 0, "reasons": ""}
+    start = origin or path
+    own = scene_from_name(os.path.splitext(os.path.basename(start))[0])
+    folder = scene_from_name(os.path.basename(os.path.dirname(start)))
+    found = own or folder
+    if folder and (not own or own["scene_date"] == folder["scene_date"]):
+        found = folder
+    if not found:
+        return None
+    found = {**found, "site": found["site"] if not found["site"].islower()
+             else string.capwords(found["site"]), "title": _titled(found["title"]),
+             "performers": _titled(found["performers"])}
+    reasons = []
+    conf = 0.95
+    if not found["marked"]:
+        conf = 0.8
+        reasons.append("no XXX marker: check it is a scene")
+    if not found["scene_date"]:
+        conf = 0.6
+        reasons.append("no scene date")
+    if not (found["performers"] or found["title"]):
+        conf = 0.5
+        reasons.append("no performer or title")
+    return {**found, "kind": "scene", "confidence": conf, "flagged": 0, "reasons": "; ".join(reasons)}
+
+
+def find_scenes(con, cfg) -> int:
+    """Recognise scenes among scanned files, from their original names.
+
+    Runs after each parse so LLM answers and files already moved need no --redo. Only a
+    person's edit outranks it, and the original name comes from the first recorded move.
+    """
+    rows = con.execute("""SELECT f.id, f.path, p.kind, p.site, p.scene_date, p.performers, p.title,
+                                 p.confidence,
+                                 (SELECT m.src FROM moves m WHERE m.file_id=f.id AND m.is_sidecar=0
+                                  AND m.status='moved' ORDER BY m.id LIMIT 1) AS origin
+                          FROM files f JOIN parses p ON p.file_id=f.id
+                          WHERE f.missing=0 AND p.source<>'manual'
+                          AND p.kind NOT IN ('music','software')""").fetchall()
+    changed = 0
+    for r in rows:
+        s = identify_scene(r["path"], r["origin"], cfg)
+        if not s or all(s[k] == r[k] for k in ("kind", "site", "scene_date", "performers",
+                                               "title", "confidence")):
+            continue
+        con.execute("""UPDATE parses SET kind='scene', title=?, year=?, edition=NULL, season=NULL,
+                       episode=NULL, episode_last=NULL, episode_title=NULL, site=?, scene_date=?,
+                       performers=?, source='guessit', confidence=?, flagged=0, reasons=?,
+                       llm_json=NULL, imdb_id=NULL, updated_at=? WHERE file_id=?""",
+                    (s["title"], s["year"], s["site"], s["scene_date"], s["performers"],
+                     s["confidence"], s["reasons"], now(), r["id"]))
+        changed += 1
+    return changed
+
+
 def _software_title(stem: str) -> tuple[str, bool]:
     """Return (product name, whether a dotted version followed it)."""
     m = TITLE_END.search(stem)
@@ -437,7 +583,8 @@ def parse_all(con, cfg, redo=False, log=print) -> dict:
         stats["parsed"] += 1
         stats["flagged"] += info["flagged"]
     stats["album_updates"] = group_albums(con, cfg)
+    stats["scenes"] = find_scenes(con, cfg)
     con.commit()
     log(f"parsed {stats['parsed']} files, {stats['flagged']} flagged for the LLM, "
-        f"{stats['album_updates']} tracks grouped into albums")
+        f"{stats['album_updates']} tracks grouped into albums, {stats['scenes']} scenes updated")
     return stats

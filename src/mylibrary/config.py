@@ -48,6 +48,7 @@ def _list(raw: str) -> list[str]:
 TV_LAYOUT = "{title}{year}/Season {season}/{title}{year} - S{season}E{episode}{episode_title}{quality}"
 MUSIC_LAYOUT = "{artist}/{album}/{track}{title}"
 SOFTWARE_LAYOUT = "{title}/{filename}"
+ADULT_LAYOUT = "{site}/{site}{date}{performers}{title}{quality}"
 AUDIO_EXT = "mp3,flac,m4a,aac,ogg,opus,wav,wma,aiff,ape"
 LEFTOVER_EXT = "txt,nfo,jpg,jpeg,png,gif,bmp,url,lnk,website,sfv,md5,srr"
 SOFTWARE_EXT = "exe,msi,deb,rpm,dmg,pkg,appimage,zip,rar,7z,tgz,tar.gz,tar.xz,tar.bz2"
@@ -72,6 +73,8 @@ class Config:
     music_layout: str = MUSIC_LAYOUT
     software_dir: str = "Software"
     software_layout: str = SOFTWARE_LAYOUT
+    adult_dir: str = "Adult"
+    adult_layout: str = ADULT_LAYOUT
     video_ext: set[str] = field(default_factory=set)
     audio_ext: set[str] = field(default_factory=set)
     software_ext: set[str] = field(default_factory=set)
@@ -126,6 +129,8 @@ def load(path: str | os.PathLike | None = None) -> Config:
         music_layout=get("library", "music_layout", MUSIC_LAYOUT),
         software_dir=get("library", "software_dir", "Software"),
         software_layout=get("library", "software_layout", SOFTWARE_LAYOUT),
+        adult_dir=get("library", "adult_dir", "Adult"),
+        adult_layout=get("library", "adult_layout", ADULT_LAYOUT),
         audio_ext={e.lower().lstrip(".") for e in _list(cp.get(
             "library", "audio_extensions", fallback=AUDIO_EXT))},
         software_ext={e.lower().lstrip(".") for e in _list(cp.get(

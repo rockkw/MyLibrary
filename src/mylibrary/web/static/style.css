@@ -113,7 +113,9 @@ code, .mono { font-family: ui-monospace, Menlo, monospace; }
 #ed-edition, #ed-kind { grid-column: 1 / -1; }
 #ed-tv { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.4rem; }
 #ed-music { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; }
-#ed-tv[hidden], #ed-music[hidden], #ed-edition[hidden], #ed-year[hidden] { display: none; }
+#ed-scene { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; }
+#ed-scene input:last-child { grid-column: 1 / -1; }
+#ed-tv[hidden], #ed-music[hidden], #ed-scene[hidden], #ed-edition[hidden], #ed-year[hidden] { display: none; }
 #ed-episode-title { grid-column: 1 / -1; }
 .edit input:focus, .edit select:focus { outline: none; border-color: #f90; }
 .btnrow { display: flex; gap: 0.5rem; margin-top: 0.7rem; flex-wrap: wrap; }

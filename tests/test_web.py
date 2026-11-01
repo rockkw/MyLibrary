@@ -134,3 +134,23 @@ def test_web_never_deletes(client):
     src = (Path(sys.modules["mylibrary.web.app"].__file__)).read_text()
     assert "clean_leftovers" not in src
 
+
+
+def test_edit_saves_scene_fields(client, lib):
+    con = lib["con"]
+    pid = con.execute("SELECT id FROM proposals WHERE plan_id=(SELECT MAX(id) FROM plans) "
+                      "AND status='review' LIMIT 1").fetchone()[0]
+    r = client.post("/api/edit", json={"id": pid, "title": "T", "kind": "scene", "site": "Acme",
+                                       "scene_date": "2026-06-21", "performers": "Ann Lee"})
+    assert r.status_code == 200 and "Adult/Acme/Acme - 2026-06-21 - Ann Lee - T" in r.get_json()["dst"]
+    d = client.get(f"/api/proposal/{pid}").get_json()
+    assert (d["kind"], d["site"], d["performers"]) == ("scene", "Acme", "Ann Lee")
+
+
+def test_edit_rejects_bad_scene_date(client, lib):
+    con = lib["con"]
+    pid = con.execute("SELECT id FROM proposals WHERE plan_id=(SELECT MAX(id) FROM plans) "
+                      "AND status='review' LIMIT 1").fetchone()[0]
+    r = client.post("/api/edit", json={"id": pid, "title": "T", "kind": "scene", "site": "A",
+                                       "scene_date": "soon"})
+    assert r.status_code == 400

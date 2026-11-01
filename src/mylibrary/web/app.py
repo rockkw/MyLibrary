@@ -135,7 +135,8 @@ def api_edit():
         res = review.edit(con(), CFG, int(body["id"]), body.get("title", ""), year,
                           body.get("edition"), kind, season, episode, last,
                           body.get("episode_title"), body.get("artist"), body.get("album"),
-                          track, disc)
+                          track, disc, body.get("site"), body.get("scene_date"),
+                          body.get("performers"))
     except ValueError as e:
         abort(400, str(e))
     res["cli"] = f'mylib edit {res["id"]} --title "{body.get("title","")}"' + \
@@ -146,6 +147,9 @@ def api_edit():
         (f" --episode {episode}" if episode is not None else "") + \
         (f" --episode-last {last}" if last is not None else "") + \
         (f' --episode-title "{body["episode_title"]}"' if body.get("episode_title") else "") + \
+        (f' --site "{body["site"]}"' if body.get("site") else "") + \
+        (f' --date {body["scene_date"]}' if body.get("scene_date") else "") + \
+        (f' --performers "{body["performers"]}"' if body.get("performers") else "") + \
         (f' --artist "{body["artist"]}"' if body.get("artist") else "") + \
         (f' --album "{body["album"]}"' if body.get("album") else "") + \
         (f" --track {track}" if track is not None else "") + \

@@ -2,6 +2,8 @@
 
 import json
 import os
+import re
+from datetime import date
 
 from .db import now
 from .plan import destination, needs
@@ -38,11 +40,13 @@ def edit(con, cfg, proposal_id: int, title: str, year: int | None,
          edition: str | None = None, kind: str | None = None, season: int | None = None,
          episode: int | None = None, episode_last: int | None = None,
          episode_title: str | None = None, artist: str | None = None,
-         album: str | None = None, track: int | None = None, disc: int | None = None) -> dict:
+         album: str | None = None, track: int | None = None, disc: int | None = None,
+         site: str | None = None, scene_date: str | None = None,
+         performers: str | None = None) -> dict:
     """Set a manual identification and recompute the target. Approves if no conflict.
 
     edition=None keeps the current edition; "" clears it. episode_title works the same way.
-    kind is movie, episode, music or software. None infers it from the fields given, then
+    kind is movie, episode, music, software or scene. None infers it from the fields given, then
     keeps the file's current kind, then falls back to movie. For an episode, title is the
     series name; for music, the track title. Other fields keep their current value when
     None, a new episode clears episode_last, and "" clears artist or album.
@@ -53,9 +57,17 @@ def edit(con, cfg, proposal_id: int, title: str, year: int | None,
     if p["status"] in ("applied",):
         raise ValueError("already applied")
     f = con.execute("SELECT * FROM files WHERE id=?", (p["file_id"],)).fetchone()
+    kept_title = title is None
     title = (title or "").strip()
-    if kind not in (None, "movie", "episode", "music", "software"):
-        raise ValueError("kind must be movie, episode, music or software")
+    if kind not in (None, "movie", "episode", "music", "software", "scene"):
+        raise ValueError("kind must be movie, episode, music, software or scene")
+    if scene_date:
+        try:
+            date.fromisoformat(scene_date)
+        except ValueError:
+            raise ValueError("date must be YYYY-MM-DD") from None
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", scene_date):
+            raise ValueError("date must be YYYY-MM-DD")
     if any(n is not None and n < 0 for n in (season, episode, episode_last, track, disc)):
         raise ValueError("season, episode, track and disc cannot be negative")
     cur = con.execute("SELECT * FROM parses WHERE file_id=?", (f["id"],)).fetchone()
@@ -65,15 +77,18 @@ def edit(con, cfg, proposal_id: int, title: str, year: int | None,
             kind = "episode"
         elif any(v is not None for v in (artist, album, track, disc)):
             kind = "music"
+        elif any(v is not None for v in (site, scene_date, performers)):
+            kind = "scene"
         else:
-            kind = was.get("kind") if was.get("kind") in ("episode", "music", "software") \
+            kind = was.get("kind") if was.get("kind") in ("episode", "music", "software", "scene") \
                 else "movie"
     kept = lambda value, key: value if value is not None else was.get(key)
     if edition is None:
         edition = was.get("edition")
     edition = (edition or "").strip() or None
     ident = dict.fromkeys(("season", "episode", "episode_last", "episode_title",
-                           "artist", "album", "track", "disc"))
+                           "artist", "album", "track", "disc",
+                           "site", "scene_date", "performers"))
     if kind == "episode":
         edition = None
         ident.update(season=kept(season, "season"), episode=kept(episode, "episode"),
@@ -87,11 +102,19 @@ def edit(con, cfg, proposal_id: int, title: str, year: int | None,
                      track=kept(track, "track"), disc=kept(disc, "disc"))
     elif kind == "software":
         edition = None
+    elif kind == "scene":
+        edition = None
+        ident.update(site=(kept(site, "site") or "").strip() or None,
+                     scene_date=(kept(scene_date, "scene_date") or "").strip() or None,
+                     performers=(kept(performers, "performers") or "").strip() or None)
+        year = int(ident["scene_date"][:4]) if ident["scene_date"] else None
+        title = (was.get("title") or "") if kept_title else title
     ident.update(title=title, year=year, edition=edition, kind=kind)
     con.execute("""UPDATE parses SET title=:title, year=:year, edition=:edition, kind=:kind,
                    season=:season, episode=:episode, episode_last=:episode_last,
                    episode_title=:episode_title, artist=:artist, album=:album, track=:track,
-                   disc=:disc, source='manual', confidence=1.0, flagged=0, updated_at=:now
+                   disc=:disc, site=:site, scene_date=:scene_date, performers=:performers,
+                   source='manual', confidence=1.0, flagged=0, updated_at=:now
                    WHERE file_id=:file_id""", {**ident, "now": now(), "file_id": f["id"]})
     dst = destination(cfg, f, ident)
     clash = con.execute("""SELECT id FROM proposals WHERE plan_id=? AND dst=? AND id<>?
@@ -117,7 +140,7 @@ def list_proposals(con, plan_id, status=None, q=None, root=None, limit=500, offs
     sql = """SELECT pr.*, f.size, f.duration, f.width, f.height, f.vcodec, f.acodec,
                     f.audio_langs, f.sub_langs, f.root, p.title, p.year, p.edition, p.kind, p.source,
                     p.imdb_id, p.season, p.episode, p.episode_last, p.episode_title,
-                    p.artist, p.album, p.track, p.disc
+                    p.artist, p.album, p.track, p.disc, p.site, p.scene_date, p.performers
              FROM proposals pr JOIN files f ON f.id=pr.file_id
              LEFT JOIN parses p ON p.file_id=f.id WHERE pr.plan_id=?"""
     args = [plan_id]
@@ -129,8 +152,8 @@ def list_proposals(con, plan_id, status=None, q=None, root=None, limit=500, offs
         sql += " AND f.root=?"
         args.append(root)
     if q:
-        sql += " AND (pr.src LIKE ? OR p.title LIKE ?)"
-        args += [f"%{q}%", f"%{q}%"]
+        sql += " AND (pr.src LIKE ? OR p.title LIKE ? OR p.performers LIKE ?)"
+        args += [f"%{q}%", f"%{q}%", f"%{q}%"]
     sql += " ORDER BY pr.confidence ASC, pr.src LIMIT ? OFFSET ?"
     args += [limit, offset]
     return [dict(r) for r in con.execute(sql, args)]
@@ -140,6 +163,7 @@ def detail(con, proposal_id):
     r = con.execute("""SELECT pr.*, f.*, p.title, p.year, p.edition, p.kind, p.source,
                               p.season, p.episode, p.episode_last, p.episode_title,
                               p.artist, p.album, p.track, p.disc,
+                              p.site, p.scene_date, p.performers,
                               p.confidence AS p_conf,
                               p.reasons AS p_reasons, p.guessit_json, p.llm_json, p.imdb_id,
                               pr.id AS proposal_id, pr.status AS status, pr.reason AS reason,

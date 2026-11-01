@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS parses (
     title       TEXT,
     year        INTEGER,
     edition     TEXT,           -- Director's Cut, Final Cut, ...
-    kind        TEXT,           -- movie | episode | music | software | extra | sample | unknown
+    kind        TEXT,           -- movie | episode | music | software | scene | extra | sample | unknown
     season      INTEGER,        -- episodes only; title holds the series name
     episode     INTEGER,
     episode_last INTEGER,       -- last episode of a multi-episode file
@@ -42,6 +42,9 @@ CREATE TABLE IF NOT EXISTS parses (
     album       TEXT,
     track       INTEGER,
     disc        INTEGER,        -- set only for multi-disc albums
+    site        TEXT,           -- scenes only; title holds the scene title
+    scene_date  TEXT,           -- YYYY-MM-DD
+    performers  TEXT,           -- comma separated
     source      TEXT,           -- guessit | llm | manual
     confidence  REAL,
     flagged     INTEGER,        -- 1 = needs the LLM / a human
@@ -127,7 +130,8 @@ def connect(db_file: Path) -> sqlite3.Connection:
                                     ("episode", "INTEGER"), ("episode_last", "INTEGER"),
                                     ("episode_title", "TEXT"), ("artist", "TEXT"),
                                     ("album", "TEXT"), ("track", "INTEGER"),
-                                    ("disc", "INTEGER")))):
+                                    ("disc", "INTEGER"), ("site", "TEXT"),
+                                    ("scene_date", "TEXT"), ("performers", "TEXT")))):
         have = {r["name"] for r in con.execute(f"PRAGMA table_info({table})")}
         for col, kind in cols:
             if col not in have:

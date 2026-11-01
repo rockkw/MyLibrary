@@ -29,6 +29,10 @@ overwrite a file.**
   they reach file paths, so every part goes through `plan.clean`.
 - `parse.group_albums` runs after every parse, so compilation and disc-folder rules need no
   `--redo`. A release is a folder; only an album artist on every track outranks detection.
+- Scenes (`kind='scene'`) skip the LLM and IMDb. `parse.find_scenes` runs after every parse, so
+  no `--redo` is needed, and reads the first recorded move for a moved file's original name.
+  Auto needs an `XXX` marker and a real date; anything else goes to review. Names are
+  untrusted, so every part goes through `plan.clean`.
 - Software files are never probed, opened, or run. Only installers with a clear name and
   version can be auto; archives, ISOs, and LLM-suggested titles always need review.
 - Unfinished torrents are off limits, finished files in them included. `downloads.check`
@@ -62,6 +66,7 @@ mylib review | approve ID | skip ID | edit ID --title T --year Y [--edition E]
 mylib edit ID --title SERIES --season S --episode E [--episode-last N] [--episode-title T]
 mylib edit ID --title TRACK --artist A --album B [--track N] [--disc N]
 mylib edit ID --title PRODUCT --kind software
+mylib edit ID --site S --date YYYY-MM-DD --performers "A, B" [--title T]
 mylib apply           # dry run; --execute to rename (then auto-verify)
 mylib runs | verify --run N | undo --run N [--execute] | dupes | status
 mylib serve           # UI on http://127.0.0.1:5051

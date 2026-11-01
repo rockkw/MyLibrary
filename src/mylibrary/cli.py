@@ -11,6 +11,7 @@
   mylib edit ID --title SERIES --season S --episode E [--episode-last N] [--episode-title T]
   mylib edit ID --title TRACK --artist A --album B [--track N] [--disc N]
   mylib edit ID --title PRODUCT --kind software
+  mylib edit ID --site S --date YYYY-MM-DD --performers "A, B" [--title T]
   mylib apply [--plan N]          dry run; add --execute to actually rename
   mylib verify --run N
   mylib undo --run N              dry run; add --execute to reverse a run
@@ -51,14 +52,16 @@ def main(argv=None):
     for name in ("approve", "skip", "reset"):
         p = sub.add_parser(name); p.add_argument("ids", type=int, nargs="+")
     p = sub.add_parser("edit"); p.add_argument("id", type=int)
-    p.add_argument("--title", required=True); p.add_argument("--year", type=int)
+    p.add_argument("--title", help="optional only for a scene"); p.add_argument("--year", type=int)
     p.add_argument("--edition", help='e.g. "Final Cut"; "" clears it')
-    p.add_argument("--kind", choices=("movie", "episode", "music", "software"), help="change what this file is")
+    p.add_argument("--kind", choices=("movie", "episode", "music", "software", "scene"), help="change what this file is")
     p.add_argument("--season", type=int); p.add_argument("--episode", type=int)
     p.add_argument("--episode-last", type=int, help="last episode of a multi-episode file")
     p.add_argument("--episode-title", help='"" clears it')
     p.add_argument("--artist"); p.add_argument("--album")
     p.add_argument("--track", type=int); p.add_argument("--disc", type=int)
+    p.add_argument("--site"); p.add_argument("--date", help="scene date, YYYY-MM-DD")
+    p.add_argument("--performers", help='"A, B"')
     p = sub.add_parser("apply"); p.add_argument("--plan", type=int)
     p.add_argument("--execute", action="store_true", help="actually rename files")
     p = sub.add_parser("verify"); p.add_argument("--run", type=int, required=True)
@@ -117,8 +120,11 @@ def main(argv=None):
         res = {"updated": n}
         log(f"{a.cmd}: {n} updated")
     elif a.cmd == "edit":
+        if a.title is None and a.kind != "scene" and not (a.site or a.date or a.performers):
+            sys.exit("edit needs --title")
         res = review.edit(con, cfg, a.id, a.title, a.year, a.edition, a.kind, a.season, a.episode,
-                          a.episode_last, a.episode_title, a.artist, a.album, a.track, a.disc)
+                          a.episode_last, a.episode_title, a.artist, a.album, a.track, a.disc,
+                          a.site, a.date, a.performers)
         log(f"#{res['id']} {res['status']}: {res['dst']}")
     elif a.cmd == "apply":
         res = applymod.apply_plan(con, cfg, need_plan(), execute=a.execute, log=log)

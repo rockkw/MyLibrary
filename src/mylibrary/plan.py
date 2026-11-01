@@ -12,11 +12,12 @@ BAD_CHARS = re.compile(r'[<>"/\\|?*\x00-\x1f]')
 
 
 NAME_BYTES = 120
+SCENE_PART_BYTES = 70  # four parts of a file name must fit the 255 byte limit together
 
 
-def fit(text: str) -> str:
+def fit(text: str, limit: int = NAME_BYTES) -> str:
     """Trim a tag to a safe path-component length, in bytes, on a character boundary."""
-    return text.encode()[:NAME_BYTES].decode(errors="ignore").strip()
+    return text.encode()[:limit].decode(errors="ignore").strip()
 
 
 def clean(title: str) -> str:
@@ -89,6 +90,21 @@ def software_target(cfg, f, p) -> str | None:
     return os.path.join(f["root"], cfg.software_dir, rel)
 
 
+def scene_target(cfg, f, p) -> str | None:
+    """Adult/Site/Site - Date - Performers - Title. Names are untrusted, so all are cleaned."""
+    site, people, title = (clean(fit(p[k] or "", SCENE_PART_BYTES))
+                           for k in ("site", "performers", "title"))
+    if not site or not (people or title):
+        return None
+    when = p["scene_date"]
+    rel = cfg.adult_layout.format(site=site, date=f" - {when}" if when else "",
+                                  performers=f" - {people}" if people else "",
+                                  title=f" - {title}" if title else "",
+                                  quality=quality(f["height"], f["width"]))
+    ext = os.path.splitext(f["path"])[1].lower()
+    return os.path.join(f["root"], cfg.adult_dir, rel + ext)
+
+
 def destination(cfg, f, p) -> str | None:
     """Target path for an identification. p is a parses row or a dict with the same keys."""
     if p["kind"] == "episode":
@@ -97,6 +113,8 @@ def destination(cfg, f, p) -> str | None:
         return music_target(cfg, f, p)
     if p["kind"] == "software":
         return software_target(cfg, f, p)
+    if p["kind"] == "scene":
+        return scene_target(cfg, f, p)
     return target_for(cfg, f, p["title"], p["year"], p["edition"])
 
 
@@ -105,7 +123,7 @@ def score(con, cfg, f, p) -> tuple[float, list[str], dict]:
     notes = [p["reasons"]] if p["reasons"] else []
     if p["source"] == "manual":
         return 1.0, ["identified manually"], {}
-    if p["kind"] in ("episode", "music", "software"):  # IMDb only knows about films
+    if p["kind"] in ("episode", "music", "software", "scene"):  # IMDb only knows about films
         return round(conf, 2), notes, {}
     im = imdb.check(con, p["title"], p["year"], f["duration"])
     if im.get("match") is True:
@@ -125,7 +143,8 @@ def score(con, cfg, f, p) -> tuple[float, list[str], dict]:
 
 def needs(kind) -> str:
     return {"episode": "needs series, season and episode",
-            "music": "needs artist, album and title"}.get(kind, "needs a title")
+            "music": "needs artist, album and title",
+            "scene": "needs a site and a performer or title"}.get(kind, "needs a title")
 
 
 def make_plan(con, cfg, note="", log=print) -> dict:
@@ -143,7 +162,7 @@ def make_plan(con, cfg, note="", log=print) -> dict:
     rows = con.execute("""SELECT f.*, p.title, p.year, p.edition, p.kind, p.source, p.confidence,
                                  p.reasons, p.file_id, p.season, p.episode,
                                  p.episode_last, p.episode_title, p.artist, p.album,
-                                 p.track, p.disc
+                                 p.track, p.disc, p.site, p.scene_date, p.performers
                           FROM files f JOIN parses p ON p.file_id=f.id
                           WHERE f.missing=0 ORDER BY f.path""").fetchall()
     claimed, counts = {}, {}

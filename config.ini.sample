@@ -26,6 +26,10 @@ tv_layout = {title}{year}/Season {season}/{title}{year} - S{season}E{episode}{ep
 music_dir = Music
 music_layout = {artist}/{album}/{track}{title}
 audio_extensions = mp3,flac,m4a,aac,ogg,opus,wav,wma,aiff,ape
+; Adult scenes: Adult/Site/Site - 2026-06-21 - Performer - Title - 1080p.mp4
+; {date}, {performers}, {title} and {quality} start with " - " and are empty when unknown
+adult_dir = Adult
+adult_layout = {site}/{site}{date}{performers}{title}{quality}
 ; Software keeps its original file name. Files are fingerprinted, never opened or run.
 ; Keep {title}/ as the first folder: a rescan reads the title back from it.
 software_dir = Software

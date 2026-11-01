@@ -32,6 +32,13 @@ ffprobe  guessit   Ollama on     DB only  UI / CLI   rename    inode +
 | `mylib undo --run N` | Dry run; `--execute` reverses a whole run. | renames only |
 
 
+**Adult scenes** are recognised from names like `Site.26.06.21.Performer.Title.XXX`, whether the
+file or its release folder carries it, or `[Site] Performer Title (26.10.16)` and
+`Site - Performer - Title (17.05.2026)`, and planned into
+`Adult/Site/Site - 2026-06-21 - Performer - Title - 1080p.ext`. Only names with an `XXX` marker and
+a full date can be auto. Scenes skip the LLM, the IMDb check and the short-film rule. A scene
+already moved elsewhere is read from its original name, and gets a proposal to move here.
+
 **Music** is identified only from embedded tags (album artist first) and planned into
 `music_dir` using `music_layout`. Tracks skip the LLM. Missing artist, album or title
 means no target until reviewed, and a missing track number also needs review.

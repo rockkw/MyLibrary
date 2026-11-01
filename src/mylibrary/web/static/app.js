@@ -58,15 +58,16 @@ function episodeCode(r) {
   const last = r.episode_last && r.episode_last !== r.episode ? `-E${pad(r.episode_last)}` : '';
   return `S${pad(r.season)}E${pad(r.episode)}${last}`;
 }
+const sceneName = r => [r.site, r.performers, r.title].filter(Boolean).join(' - ') || 'unidentified scene';
 function renderList() {
   $('#list').innerHTML = state.items.map((r, i) => {
     const res = r.height ? `${r.height}p` : '';
-    const to = r.title ? `${r.artist ? `${esc(r.artist)} - ` : ''}${esc(r.title)}${r.year ? ` (${r.year})` : ''}` : '<i>unidentified</i>';
+    const to = r.kind === 'scene' ? esc(sceneName(r)) : r.title ? `${r.artist ? `${esc(r.artist)} - ` : ''}${esc(r.title)}${r.year ? ` (${r.year})` : ''}` : '<i>unidentified</i>';
     return `<div class="row ${i === state.cur ? 'sel' : ''}" data-i="${i}">
       <input type="checkbox" data-id="${r.id}" ${state.checked.has(r.id) ? 'checked' : ''}>
       <span class="conf ${confClass(r.confidence)}">${(r.confidence ?? 0).toFixed(2)}</span>
       <span class="pill ${r.status}">${r.status}</span>
-      <div class="names"><div class="to">${to}${episodeCode(r) ? `<span class="chip">${episodeCode(r)}</span>` : ''}${['music', 'software'].includes(r.kind) ? `<span class="chip">${r.kind}</span>` : ''}${r.edition ? `<span class="chip">${esc(r.edition)}</span>` : ''}${res ? `<span class="chip">${res}</span>` : ''}
+      <div class="names"><div class="to">${to}${episodeCode(r) ? `<span class="chip">${episodeCode(r)}</span>` : ''}${['music', 'software', 'scene'].includes(r.kind) ? `<span class="chip">${r.kind}</span>` : ''}${r.scene_date ? `<span class="chip">${esc(r.scene_date)}</span>` : ''}${r.edition ? `<span class="chip">${esc(r.edition)}</span>` : ''}${res ? `<span class="chip">${res}</span>` : ''}
         ${r.vcodec ? `<span class="chip">${esc(r.vcodec)}</span>` : ''}
         ${r.source ? `<span class="chip">${esc(r.source)}</span>` : ''}</div>
         <div class="from">${esc(base(r.src))}</div></div></div>`;
@@ -81,7 +82,7 @@ async function loadDetail() {
   const d = await api('/api/proposal/' + item.id);
   const decidable = !['applied', 'noop', 'ignored'].includes(d.status);
   $('#detail-pane').innerHTML = `
-    <h2>${d.title ? (d.artist ? esc(d.artist) + ' - ' : '') + esc(d.title) + (d.year ? ` (${d.year})` : '') + (d.edition ? ` - ${esc(d.edition)}` : '') + (episodeCode(d) ? ` - ${episodeCode(d)}` : '') : 'Unidentified file'}</h2>
+    <h2>${d.kind === 'scene' ? esc(sceneName(d)) : d.title ? (d.artist ? esc(d.artist) + ' - ' : '') + esc(d.title) + (d.year ? ` (${d.year})` : '') + (d.edition ? ` - ${esc(d.edition)}` : '') + (episodeCode(d) ? ` - ${episodeCode(d)}` : '') : 'Unidentified file'}</h2>
     <span class="pill ${d.status}">${d.status}</span>
     <span class="conf ${confClass(d.confidence)}" style="padding:0 .4rem;margin-left:.3rem">
       ${(d.confidence ?? 0).toFixed(2)}</span>
@@ -89,7 +90,7 @@ async function loadDetail() {
     ${d.imdb_id ? `<span class="chip">${esc(d.imdb_id)}</span>` : ''}
     <div class="detail-label">Current</div><div class="path old">${esc(d.src)}</div>
     <div class="arrow">▼ rename (same drive, no overwrite)</div>
-    <div class="path new">${d.dst ? esc(d.dst) : `— ${{episode: 'needs series, season and episode', music: 'needs artist, album and title'}[d.kind] || 'needs a title'} —`}</div>
+    <div class="path new">${d.dst ? esc(d.dst) : `— ${{episode: 'needs series, season and episode', music: 'needs artist, album and title', scene: 'needs a site and a performer or title'}[d.kind] || 'needs a title'} —`}</div>
     ${d.reason ? `<div class="reason">${esc(d.reason)}</div>` : ''}
     ${decidable ? `
     <div class="detail-label">Identify</div>
@@ -97,10 +98,16 @@ async function loadDetail() {
         <option value="movie">Movie</option>
         <option value="episode" ${d.kind === 'episode' ? 'selected' : ''}>TV episode</option>
         <option value="music" ${d.kind === 'music' ? 'selected' : ''}>Music</option>
-        <option value="software" ${d.kind === 'software' ? 'selected' : ''}>Software</option></select>
+        <option value="software" ${d.kind === 'software' ? 'selected' : ''}>Software</option>
+        <option value="scene" ${d.kind === 'scene' ? 'selected' : ''}>Adult scene</option></select>
       <input id="ed-title" value="${esc(d.title || '')}" placeholder="Title">
       <input id="ed-year" value="${d.year || ''}" placeholder="Year">
       <input id="ed-edition" value="${esc(d.edition || '')}" placeholder="Edition (optional)">
+      <div id="ed-scene">
+        <input id="ed-site" value="${esc(d.site || '')}" placeholder="Site">
+        <input id="ed-date" value="${esc(d.scene_date || '')}" placeholder="YYYY-MM-DD">
+        <input id="ed-performers" value="${esc(d.performers || '')}" placeholder="Performers, comma separated">
+      </div>
       <div id="ed-tv">
         <input id="ed-season" value="${d.season ?? ''}" placeholder="Season" inputmode="numeric">
         <input id="ed-episode" value="${d.episode ?? ''}" placeholder="Episode" inputmode="numeric">
@@ -134,7 +141,7 @@ async function loadDetail() {
   $$('[data-dec]').forEach(b => b.onclick = () => decide([d.proposal_id], b.dataset.dec));
   const save = $('#ed-save');
   if (save) save.onclick = saveEdit;
-  $$('#ed-title, #ed-year, #ed-edition, #ed-tv input, #ed-music input').forEach(el => el.onkeydown = e => {
+  $$('#ed-title, #ed-year, #ed-edition, #ed-tv input, #ed-music input, #ed-scene input').forEach(el => el.onkeydown = e => {
     if (e.key === 'Enter') saveEdit(); e.stopPropagation(); });
   const kind = $('#ed-kind');
   if (kind) {
@@ -142,9 +149,10 @@ async function loadDetail() {
       $('#ed-tv').hidden = kind.value !== 'episode';
       $('#ed-music').hidden = kind.value !== 'music';
       $('#ed-edition').hidden = kind.value !== 'movie';
-      $('#ed-year').hidden = kind.value === 'software';
+      $('#ed-scene').hidden = kind.value !== 'scene';
+      $('#ed-year').hidden = ['software', 'scene'].includes(kind.value);
       $('#ed-title').placeholder = {episode: 'Series', music: 'Track title',
-                                    software: 'Product'}[kind.value] || 'Title';
+                                    software: 'Product', scene: 'Scene title (optional)'}[kind.value] || 'Title';
     };
     kind.onchange = show;
     kind.onkeydown = e => e.stopPropagation();
@@ -165,7 +173,10 @@ async function saveEdit() {
                                       artist: $('#ed-artist').value,
                                       album: $('#ed-album').value,
                                       track: $('#ed-track').value,
-                                      disc: $('#ed-disc').value});
+                                      disc: $('#ed-disc').value,
+                                      site: $('#ed-site').value,
+                                      scene_date: $('#ed-date').value,
+                                      performers: $('#ed-performers').value});
     note(`${r.cli} → ${r.status}`);
     await refresh(true);
   } catch (e) { note(e.message, true); }

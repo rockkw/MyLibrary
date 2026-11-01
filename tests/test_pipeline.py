@@ -286,7 +286,7 @@ def test_edition_after_dash_is_not_title():
 
 
 def test_numbered_file_in_film_folder_needs_review():
-    r = parse.identify("/lib/DA13____540_2026/01.mp4", 9000, _cfg_stub())
+    r = parse.identify("/lib/AB12____300_2026/01.mp4", 9000, _cfg_stub())
     assert r["flagged"] == 1 and "numbered file" in r["reasons"]
 
 
@@ -1332,3 +1332,234 @@ def test_part_of_a_compilation_moved_alone_stays_put(lib, monkeypatch):
     reparse(lib)
     assert proposal(con, "Various Artists")["status"] == "noop"
 
+
+
+# Adult scenes
+
+DOTTED = "Acme.26.06.21.Ann.Lee.New.Friends.XXX.1080p.MP4-GRP[XC]"
+ADULT = "Adult/Acme/Acme - 2026-06-21 - Ann Lee - New Friends"
+
+
+@pytest.mark.parametrize("name,site,when,people,title", [
+    (DOTTED, "Acme", "2026-06-21", "Ann Lee", "New Friends"),
+    ("Acme.26.06.21.Ann.Lee.And.Kim.Roe.XXX.480p", "Acme", "2026-06-21", "Ann Lee, Kim Roe", None),
+    ("Acme.26.06.21.Ann.Lee.Kim.Roe.And.Sue.Poe.XXX", "Acme", "2026-06-21",
+     "Ann Lee, Kim Roe, Sue Poe", None),
+    ("Acme.21.06.02.LaStar69.Welcome.Home.XXX", "Acme", "2021-06-02", "LaStar69", "Welcome Home"),
+    ("Acme.26.08.21.Episode.473.Ann.Lee.XXX", "Acme", "2026-08-21", "Ann Lee", "Episode 473"),
+    ("[Acme] Ann Lee Holy Inspection (26.10.16)[720p][x264]", "Acme", "2026-10-16", "Ann Lee",
+     "Holy Inspection"),
+    ("[Acme] Ann Lee, Kim Roe - The Visit (04.05.2016) rq", "Acme", "2016-05-04",
+     "Ann Lee, Kim Roe", "The Visit"),
+    ("Acme - Ann Lee - Part 3, Again (17.05.2026) rq", "Acme", "2026-05-17", "Ann Lee",
+     "Part 3, Again"),
+    ("Acme - Ann Lee, Kim Roe, Sue Poe (16.01.2025) rq", "Acme", "2025-01-16",
+     "Ann Lee, Kim Roe, Sue Poe", None),
+])
+def test_scene_names(name, site, when, people, title):
+    s = parse.scene_from_name(name)
+    assert (s["site"], s["scene_date"], s["performers"], s["title"]) == (site, when, people, title)
+
+
+@pytest.mark.parametrize("name", [
+    "The.Matrix.1999.1080p.BluRay.x264-GRP", "Show.24.01.15.Guest.Name.720p.WEB",
+    "Spider-Man - Brand New Day (2026)", "UFC 312 Du Plessis Vs Strickland 2025-02-08 1080p",
+    "[Group] Some Film (2019)", "Tyler Roe - One Title - UltraHD - 4k",
+])
+def test_ordinary_names_are_not_scenes(name):
+    assert parse.scene_from_name(name) is None
+
+
+@pytest.mark.parametrize("bad", ["Acme - Ann Lee - T (17.13.2025) rq", "Acme - Ann Lee - T (31.02.2025) rq",
+                                 "[Acme] Ann Lee T (99.01.01)"])
+def test_impossible_or_future_date_is_not_guessed(bad):
+    s = parse.scene_from_name(bad)
+    assert s["site"] == "Acme" and s["scene_date"] is None
+
+
+def test_scene_goes_to_adult_folder_without_llm(lib):
+    add_files(lib, f"{DOTTED}/acme.26.06.21.ann.lee.new.friends.mp4")
+    run_to_plan(lib)
+    con = lib["con"]
+    p = proposal(con, "acme.26.06.21")
+    assert p["status"] == "auto" and p["dst"].endswith(f"{ADULT}.mp4")
+    r = con.execute("SELECT kind, flagged FROM parses").fetchone()
+    assert r["kind"] == "scene" and r["flagged"] == 0
+
+
+def test_lowercase_file_takes_site_spelling_from_folder(lib):
+    add_files(lib, "CoolSite.26.06.21.Ann.Lee.XXX.1080p/cs.26.06.21.ann.lee.mp4")
+    run_to_plan(lib)
+    assert "/Adult/CoolSite/CoolSite - 2026-06-21 - Ann Lee." in proposal(lib["con"], "cs.26")["dst"]
+
+
+def test_short_scene_is_not_an_extra(lib, monkeypatch):
+    lib["cfg"].min_duration_min = 40
+    probe_with(monkeypatch, {})
+    add_files(lib, f"{DOTTED}.mp4")
+    run_to_plan(lib)
+    assert proposal(lib["con"], "Acme.26")["status"] == "auto"
+
+
+def test_scene_sample_stays_ignored(lib):
+    add_files(lib, f"{DOTTED}/sample.mp4")
+    run_to_plan(lib)
+    assert proposal(lib["con"], "sample.mp4")["status"] == "ignored"
+
+
+@pytest.mark.parametrize("name,reason", [
+    ("Acme - Ann Lee - T (17.05.2026) rq.mp4", "no XXX marker"),
+    ("Acme.2024.Ann.Lee.Title.XXX.1080p.mp4", "no scene date"),
+    ("Acme - Ann Lee - T (17.13.2025) rq.mp4", "no scene date"),
+])
+def test_unsure_scene_goes_to_review(lib, name, reason):
+    add_files(lib, name)
+    run_to_plan(lib)
+    p = proposal(lib["con"], "Acme")
+    assert p["status"] == "review" and reason in p["reason"]
+
+
+def test_scene_with_only_a_site_has_no_target(lib):
+    add_files(lib, "Acme.26.06.21.XXX.1080p.mp4")
+    run_to_plan(lib)
+    p = proposal(lib["con"], "Acme")
+    assert p["status"] == "review" and p["dst"] is None and "needs a site" in p["reason"]
+
+
+def test_llm_answer_is_replaced_without_redo(lib):
+    con, cfg = lib["con"], lib["cfg"]
+    add_files(lib, f"{DOTTED}.mp4")
+    run_to_plan(lib)
+    con.execute("UPDATE parses SET kind='extra', source='llm', flagged=1, title='Acme'")
+    parse.parse_all(con, cfg, log=quiet)
+    plan.make_plan(con, cfg, log=quiet)
+    assert proposal(con, "Acme.26")["status"] == "auto"
+
+
+def test_scenes_on_one_site_day_do_not_collide(lib):
+    add_files(lib, "Acme.26.06.21.Ann.Lee.XXX.1080p.mp4", "Acme.26.06.21.Kim.Roe.XXX.1080p.mp4")
+    run_to_plan(lib)
+    st = statuses(lib["con"], plan.current_plan(lib["con"]))
+    assert {v for k, v in st.items() if k.startswith("Acme")} == {"auto"}
+
+
+def test_identical_scene_targets_are_a_conflict(lib):
+    add_files(lib, "Acme.26.06.21.Ann.Lee.XXX.1080p.mp4", "Acme.26.06.21.Ann.Lee.XXX.720p.mp4")
+    run_to_plan(lib)
+    assert "conflict" in statuses(lib["con"], plan.current_plan(lib["con"])).values()
+
+
+def test_hostile_scene_name_cannot_escape_root(lib):
+    add_files(lib, "[...] Ann Lee T (17.05.2026) rq.mp4")
+    add_files(lib, "[a$b] Ann Lee T (17.05.2026) rq.mp4")
+    con = lib["con"]
+    con_rows = run_to_plan(lib)
+    root = str(lib["root"])
+    for r in con.execute("SELECT dst FROM proposals WHERE plan_id=? AND dst IS NOT NULL",
+                         (con_rows["plan_id"],)):
+        assert os.path.realpath(r["dst"]).startswith(root + os.sep)
+
+
+def test_very_long_scene_name_fits_the_file_system(lib):
+    people = ", ".join(f"Performer Number{i}" for i in range(30))
+    add_files(lib, f"Acme - {people} (16.01.2025) rq.mp4"[:200] + " (16.01.2025) rq.mp4")
+    run_to_plan(lib)
+    assert len(os.path.basename(proposal(lib["con"], "Acme")["dst"]).encode()) <= 255
+
+
+def moved_scene(lib):
+    con, cfg = lib["con"], lib["cfg"]
+    add_files(lib, f"{DOTTED}/acme.26.06.21.ann.lee.new.friends.mp4")
+    run_to_plan(lib)
+    apply.apply_plan(con, cfg, plan.current_plan(con), execute=True, log=quiet)
+    return con, cfg
+
+
+def test_moved_scene_stays_put_on_rescan_and_redo(lib):
+    con, cfg = moved_scene(lib)
+    assert (lib["root"] / f"{ADULT}.mp4").exists()
+    run_to_plan(lib)
+    assert proposal(con, "Adult/Acme")["status"] == "noop"
+    reparse(lib)
+    assert proposal(con, "Adult/Acme")["status"] == "noop"
+
+
+def test_placed_scene_with_no_history_stays_put(lib):
+    add_files(lib, f"{ADULT}.mp4")
+    run_to_plan(lib)
+    assert proposal(lib["con"], "Adult/Acme")["status"] == "noop"
+
+
+def test_scene_already_in_movies_gets_a_proposal_from_its_first_name(lib):
+    con, cfg = lib["con"], lib["cfg"]
+    add_files(lib, f"{DOTTED}/acme.mp4")
+    run_to_plan(lib)
+    pid = proposal(con, "acme.mp4")["id"]
+    fid = proposal(con, "acme.mp4")["file_id"]
+    review.edit(con, cfg, pid, "Acme", None, kind="movie")
+    apply.apply_plan(con, cfg, plan.current_plan(con), execute=True, log=quiet)
+    moved = lib["root"] / "Movies/Acme/Acme.mp4"
+    assert moved.exists()
+    con.execute("UPDATE parses SET source='llm' WHERE file_id=?", (fid,))  # as the first run left it
+    run_to_plan(lib)
+    p = proposal(con, "Movies/Acme")
+    assert p["dst"].endswith("Adult/Acme/Acme - 2026-06-21 - Ann Lee - New Friends.mp4")
+    assert p["status"] == "auto"
+    apply.apply_plan(con, cfg, plan.current_plan(con), execute=True, log=quiet)
+    assert (lib["root"] / f"{ADULT}.mp4").exists() and not moved.exists()
+    run_to_plan(lib)
+    assert proposal(con, "Adult/Acme")["status"] == "noop"
+
+
+def test_manual_scene_edit_is_kept(lib):
+    con, cfg = lib["con"], lib["cfg"]
+    add_files(lib, f"{DOTTED}.mp4")
+    run_to_plan(lib)
+    res = review.edit(con, cfg, proposal(con, "Acme.26")["id"], "My Title", None,
+                      site="Other", scene_date="2020-01-02", performers="Sue Poe")
+    assert res["status"] == "approved"
+    assert res["dst"].endswith("Adult/Other/Other - 2020-01-02 - Sue Poe - My Title.mp4")
+    reparse(lib)
+    assert proposal(con, "Acme.26")["dst"] == res["dst"]
+
+
+def test_scene_edit_keeps_unset_fields_and_title_when_none(lib):
+    con, cfg = lib["con"], lib["cfg"]
+    add_files(lib, f"{DOTTED}.mp4")
+    run_to_plan(lib)
+    res = review.edit(con, cfg, proposal(con, "Acme.26")["id"], None, None, performers="Sue Poe")
+    assert res["dst"].endswith("Acme - 2026-06-21 - Sue Poe - New Friends.mp4")
+
+
+def test_scene_edit_turns_a_movie_into_a_scene(lib):
+    con, cfg = lib["con"], lib["cfg"]
+    add_files(lib, "misc/Ann and the visit.mp4")
+    run_to_plan(lib)
+    res = review.edit(con, cfg, proposal(con, "the visit")["id"], "", None, kind="scene",
+                      site="Acme", performers="Ann")
+    assert res["dst"].endswith("Adult/Acme/Acme - Ann.mp4")
+
+
+@pytest.mark.parametrize("bad", ["2026-13-01", "21.06.2026", "../x", "20260621"])
+def test_scene_edit_rejects_bad_date(lib, bad):
+    con, cfg = lib["con"], lib["cfg"]
+    add_files(lib, f"{DOTTED}.mp4")
+    run_to_plan(lib)
+    with pytest.raises(ValueError):
+        review.edit(con, cfg, proposal(con, "Acme.26")["id"], "T", None, scene_date=bad)
+
+
+def test_old_database_gains_scene_columns(tmp_path):
+    f = tmp_path / "old.db"
+    c = db.connect(f)
+    for col in ("site", "scene_date", "performers"):
+        c.execute(f"ALTER TABLE parses DROP COLUMN {col}")
+    c.commit(); c.close()
+    have = {r["name"] for r in db.connect(f).execute("PRAGMA table_info(parses)")}
+    assert {"site", "scene_date", "performers"} <= have
+
+
+def test_adult_folder_is_never_a_leftover(lib):
+    (lib["root"] / "Adult").mkdir()
+    report = leftovers.find(lib["con"], lib["cfg"])
+    assert not any(i["path"].endswith("/Adult") for i in report["empty"])

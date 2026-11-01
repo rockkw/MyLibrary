@@ -52,7 +52,7 @@ def _candidates(con, cfg) -> set[str]:
         if not root or f"{os.sep}{SAFETY_DIR}{os.sep}" in r["src"]:
             continue
         protected = {os.path.join(root, d) for d in (cfg.movies_dir, cfg.tv_dir, cfg.music_dir,
-                                                     cfg.software_dir, SAFETY_DIR)}
+                                                     cfg.software_dir, cfg.adult_dir, SAFETY_DIR)}
         folder = os.path.dirname(r["src"])
         while folder != root:
             if folder in protected:
