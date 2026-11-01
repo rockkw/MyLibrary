@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import shutil
 import sqlite3
 import time
 import urllib.error
@@ -8,7 +9,8 @@ import urllib.error
 import pytest
 
 from conftest import tree_digest
-from mylibrary import apply, classify, config, db, downloads, dupes, parse, plan, review, scan
+from mylibrary import apply, classify, cli, config, db, downloads, dupes, leftovers, parse
+from mylibrary import plan, review, scan
 
 
 def run_to_plan(lib):
@@ -963,4 +965,226 @@ def test_password_with_dollar_stays_literal_and_env_form_expands(tmp_path, monke
     monkeypatch.setenv("TX_PW", "from-env")
     ini.write_text("[transmission]\npassword = ${TX_PW}\n")
     assert config.load(ini).transmission_password == "from-env"
+
+
+# Leftover folders
+
+MESSY = "Show.Name.2019.S01E02.The.Title"
+
+
+def moved_out(lib, *extras):
+    """Apply a move out of a messy folder that also holds extras, then return that folder."""
+    con, cfg = lib["con"], lib["cfg"]
+    add_files(lib, f"{MESSY}/Show.Name.2019.S01E02.The.Title.mkv", *(f"{MESSY}/{e}" for e in extras))
+    run_to_plan(lib)
+    apply.apply_plan(con, cfg, plan.current_plan(con), execute=True, log=lambda *a: None)
+    return lib["root"] / MESSY
+
+
+def paths(items):
+    return [i["path"] for i in items]
+
+
+def test_empty_and_leftover_folders_are_reported_and_nothing_changes(lib):
+    folder = moved_out(lib, "info.nfo", "._stub.mp4", "cover.JPG", ".DS_Store")
+    before = tree_digest(lib["root"])
+    res = leftovers.find(lib["con"], lib["cfg"])
+    assert str(folder) in paths(res["leftovers"])
+    item = next(i for i in res["leftovers"] if i["path"] == str(folder))
+    assert sorted(f["name"] for f in item["files"]) == [
+        ".DS_Store", "._stub.mp4", "cover.JPG", "info.nfo"]
+    assert tree_digest(lib["root"]) == before and folder.is_dir()
+
+
+def test_fully_empty_folder_is_its_own_group(lib):
+    folder = moved_out(lib)
+    res = leftovers.find(lib["con"], lib["cfg"])
+    assert str(folder) in paths(res["empty"]) and not res["leftovers"]
+
+
+@pytest.mark.parametrize("keeper", ["Other.S02.Complete.mkv", "song.mp3", "archive.rar", "notes.docx", "noext"])
+def test_folder_with_anything_else_is_not_suggested(lib, keeper):
+    folder = moved_out(lib, keeper)
+    res = leftovers.find(lib["con"], lib["cfg"])
+    assert str(folder) not in paths(res["empty"] + res["leftovers"] + res["held"])
+
+
+def test_large_leftover_type_is_kept(lib):
+    lib["cfg"].leftover_max_mb = 0
+    folder = moved_out(lib, "big.txt")
+    assert str(folder) not in paths(leftovers.find(lib["con"], lib["cfg"])["leftovers"])
+
+
+def test_symlink_is_not_treated_as_a_leftover(lib):
+    folder = moved_out(lib)
+    os.symlink("/etc/hostname", folder / "link.txt")
+    assert str(folder) not in paths(leftovers.find(lib["con"], lib["cfg"])["leftovers"])
+
+
+def test_unrelated_empty_folder_is_not_suggested(lib):
+    moved_out(lib)
+    (lib["root"] / "my-empty-folder").mkdir()
+    res = leftovers.find(lib["con"], lib["cfg"])
+    assert not any("my-empty-folder" in p for p in paths(res["empty"]))
+
+
+def test_root_library_and_safety_folders_are_never_suggested(lib):
+    moved_out(lib)
+    con, cfg = lib["con"], lib["cfg"]
+    root = lib["root"]
+    r = con.execute("SELECT MAX(id) FROM runs").fetchone()[0]
+    for name in ("Movies", "Shows", ".mylibrary-safety", "x"):
+        con.execute("INSERT INTO moves (run_id, src, dst, status) VALUES (?,?,'z','moved')",
+                    (r, str(root / name / "a.mkv")))
+    (root / "x").mkdir()
+    con.execute("INSERT INTO moves (run_id, src, dst, status) VALUES (?,?,'z','moved')",
+                (r, str(root / "top.mkv")))
+    res = leftovers.find(con, cfg)
+    found = paths(res["empty"] + res["leftovers"] + res["held"])
+    assert str(root / "x") in found
+    assert not {str(root), str(root / "Movies"), str(root / "Shows"),
+                str(root / ".mylibrary-safety")} & set(found)
+
+
+def test_parent_is_reported_once_instead_of_each_child(lib):
+    con, cfg = lib["con"], lib["cfg"]
+    add_files(lib, "pack/season1/Show.S01E01.mkv", "pack/season2/Show.S02E01.mkv", "pack/a.nfo")
+    moved_out(lib)
+    run_to_plan(lib)
+    apply.apply_plan(con, cfg, plan.current_plan(con), execute=True, log=lambda *a: None)
+    found = paths(leftovers.find(con, cfg)["leftovers"] + leftovers.find(con, cfg)["empty"])
+    assert str(lib["root"] / "pack") in found
+    assert not any("season" in p for p in found)
+
+
+def test_folder_listed_by_a_torrent_is_held_with_its_name(lib, monkeypatch):
+    folder = moved_out(lib, "info.nfo")
+    transmission(lib, monkeypatch, [torrent(lib, [f"{MESSY}/info.nfo"])])
+    res = leftovers.find(lib["con"], lib["cfg"])
+    assert str(folder) in paths(res["held"]) and str(folder) not in paths(res["leftovers"])
+    assert next(i for i in res["held"] if i["path"] == str(folder))["torrent"] == "T"
+
+
+def test_unknown_download_state_suggests_nothing(lib, monkeypatch):
+    moved_out(lib, "info.nfo")
+    transmission(lib, monkeypatch, error="cannot check downloads (down)")
+    res = leftovers.find(lib["con"], lib["cfg"])
+    assert res["error"] and not (res["empty"] or res["leftovers"] or res["held"])
+
+
+def test_print0_lists_only_paths_safe_to_remove(lib, monkeypatch, capsys):
+    folder = moved_out(lib, "info.nfo")
+    cli.main(["--config", str(lib["ini"]), "leftovers", "--print0"])
+    assert str(folder) in capsys.readouterr().out.split("\0")
+    monkeypatch.setattr(downloads, "check", lambda cfg: downloads.Active(error="down"))
+    with pytest.raises(SystemExit) as e:
+        cli.main(["--config", str(lib["ini"]), "leftovers", "--print0"])
+    assert "not suggesting" in str(e.value) and capsys.readouterr().out == ""
+
+
+def test_print0_leaves_out_folders_held_by_a_torrent(lib, monkeypatch, capsys):
+    folder = moved_out(lib, "info.nfo")
+    held = downloads.Active(held={str(folder / "info.nfo"): "T"})
+    monkeypatch.setattr(downloads, "check", lambda cfg: held)
+    cli.main(["--config", str(lib["ini"]), "leftovers", "--print0"])
+    assert str(folder) not in capsys.readouterr().out
+
+
+def test_undo_recreates_a_folder_that_was_cleaned_up(lib):
+    con, cfg = lib["con"], lib["cfg"]
+    folder = moved_out(lib, "info.nfo")
+    run = con.execute("SELECT MAX(id) FROM runs").fetchone()[0]
+    shutil.rmtree(folder)  # the person removed it, as the report suggested
+    res = apply.undo(con, cfg, run, execute=True, log=lambda *a: None)
+    assert res["verify"]["ok"] if "ok" in res["verify"] else res["restored"]
+    assert (folder / "Show.Name.2019.S01E02.The.Title.mkv").exists()
+
+
+# Approving leftover folders
+
+def quiet(*a):
+    return None
+
+
+def cleanup_state(lib):
+    return lib["con"], lib["cfg"], moved_out(lib, "info.nfo", "._x.mp4")
+
+
+def test_clean_is_a_dry_run_by_default(lib):
+    con, cfg, folder = cleanup_state(lib)
+    res = apply.clean_leftovers(con, cfg, [str(folder)], log=quiet)
+    assert res["dry_run"] and res["count"] == 1 and folder.is_dir()
+
+
+def test_clean_moves_aside_keeps_every_file_and_verifies(lib):
+    con, cfg, folder = cleanup_state(lib)
+    before = tree_digest(lib["root"])
+    res = apply.clean_leftovers(con, cfg, [str(folder)], execute=True, log=quiet)
+    assert res["moved"] == 1 and res["verify"]["ok"] and not folder.exists()
+    kept = lib["root"] / f".mylibrary-safety/run-{res['run_id']}/leftovers" / MESSY
+    assert sorted(p.name for p in kept.iterdir()) == ["._x.mp4", "info.nfo"]
+    assert sum(1 for p in kept.iterdir()) == 2
+    run = con.execute("SELECT * FROM runs WHERE id=?", (res["run_id"],)).fetchone()
+    assert run["kind"] == "cleanup" and run["status"] == "ok"
+    gone = before.copy()
+    now_tree = tree_digest(lib["root"])
+    assert all(now_tree.get(h, 0) <= n for h, n in gone.items())
+
+
+def test_clean_undo_puts_it_back(lib):
+    con, cfg, folder = cleanup_state(lib)
+    before = tree_digest(lib["root"])
+    res = apply.clean_leftovers(con, cfg, [str(folder)], execute=True, log=quiet)
+    back = apply.undo(con, cfg, res["run_id"], execute=True, log=quiet)
+    assert back["restored"] == 1 and back["verify"]["ok"]
+    assert (folder / "info.nfo").exists() and tree_digest(lib["root"]) == before
+
+
+def test_undone_cleanup_never_suggests_the_safety_folder(lib):
+    con, cfg, folder = cleanup_state(lib)
+    res = apply.clean_leftovers(con, cfg, [str(folder)], execute=True, log=quiet)
+    apply.undo(con, cfg, res["run_id"], execute=True, log=quiet)
+    report = leftovers.find(con, cfg)
+    found = paths(report["empty"] + report["leftovers"] + report["held"])
+    assert str(folder) in found and not any(".mylibrary-safety" in p for p in found)
+
+
+@pytest.mark.parametrize("target", ["", "Movies", "not-a-suggestion", "..", ".mylibrary-safety"])
+def test_clean_refuses_anything_not_suggested(lib, target):
+    con, cfg, folder = cleanup_state(lib)
+    (lib["root"] / "not-a-suggestion").mkdir()
+    before = tree_digest(lib["root"])
+    res = apply.clean_leftovers(con, cfg, [str(lib["root"] / target)], execute=True, log=quiet)
+    assert res["moved"] == 0 and res["refused"]
+    assert tree_digest(lib["root"]) == before
+
+
+def test_clean_refuses_a_folder_that_gained_media_after_approval(lib):
+    con, cfg, folder = cleanup_state(lib)
+    (folder / "new.mkv").write_bytes(b"x")
+    res = apply.clean_leftovers(con, cfg, [str(folder)], execute=True, log=quiet)
+    assert res["moved"] == 0 and (folder / "new.mkv").exists()
+
+
+def test_clean_refuses_a_folder_a_torrent_lists(lib, monkeypatch):
+    con, cfg, folder = cleanup_state(lib)
+    transmission(lib, monkeypatch, [torrent(lib, [f"{MESSY}/info.nfo"])])
+    res = apply.clean_leftovers(con, cfg, [str(folder)], execute=True, log=quiet)
+    assert res["moved"] == 0 and folder.is_dir()
+
+
+def test_clean_stops_when_downloads_cannot_be_checked(lib, monkeypatch):
+    con, cfg, folder = cleanup_state(lib)
+    transmission(lib, monkeypatch, error="cannot check downloads (down)")
+    res = apply.clean_leftovers(con, cfg, [str(folder)], execute=True, log=quiet)
+    assert res["error"] and folder.is_dir()
+
+
+def test_clean_through_cli(lib):
+    folder = moved_out(lib, "info.nfo")
+    args = ["--config", str(lib["ini"]), "leftovers", "--clean", str(folder)]
+    cli.main(args)
+    assert folder.is_dir()
+    cli.main(args + ["--execute"])
+    assert not folder.exists()
 

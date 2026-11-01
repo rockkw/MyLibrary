@@ -49,6 +49,7 @@ TV_LAYOUT = "{title}{year}/Season {season}/{title}{year} - S{season}E{episode}{e
 MUSIC_LAYOUT = "{artist}/{album}/{track}{title}"
 SOFTWARE_LAYOUT = "{title}/{filename}"
 AUDIO_EXT = "mp3,flac,m4a,aac,ogg,opus,wav,wma,aiff,ape"
+LEFTOVER_EXT = "txt,nfo,jpg,jpeg,png,gif,bmp,url,lnk,website,sfv,md5,srr"
 SOFTWARE_EXT = "exe,msi,deb,rpm,dmg,pkg,appimage,zip,rar,7z,tgz,tar.gz,tar.xz,tar.bz2"
 
 
@@ -78,6 +79,8 @@ class Config:
     ignore_words: list[str] = field(default_factory=list)
     min_duration_min: float = 40.0
     settle_minutes: float = 10.0
+    leftover_ext: set[str] = field(default_factory=set)
+    leftover_max_mb: float = 5.0
     ollama_enabled: bool = True
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "mistral"
@@ -136,6 +139,9 @@ def load(path: str | os.PathLike | None = None) -> Config:
             "library", "ignore_words", fallback="sample,trailer"))],
         min_duration_min=float(get("library", "min_duration_minutes", "40")),
         settle_minutes=float(get("library", "settle_minutes", "10")),
+        leftover_ext={e.lower().lstrip(".") for e in _list(cp.get(
+            "library", "leftover_extensions", fallback=LEFTOVER_EXT))},
+        leftover_max_mb=float(get("library", "leftover_max_mb", "5")),
         ollama_enabled=get("ollama", "enabled", "true").lower() in ("1", "true", "yes"),
         ollama_url=get("ollama", "url", "http://localhost:11434").rstrip("/"),
         ollama_model=get("ollama", "model", "mistral"),

@@ -45,6 +45,21 @@ never opened or run. Only an installer with a clear name and version can be auto
 archives, ISOs and titles suggested by the LLM always need review. Each ISO stays a
 film or becomes software from the signs in its name, and unclear ones go to review.
 
+**Leftover folders:** `mylib leftovers` and the Leftovers page list folders your moves
+left empty or holding only small extras such as `.nfo`, `.txt` and images. Tick folders
+on that page and approve them, or run `mylib leftovers --clean PATH --execute`. They move
+to `.mylibrary-safety/run-N/leftovers/`, nothing is deleted, and `mylib undo --run N` or
+the Runs page puts them back. Each folder is re-checked at that moment, and one that has
+changed is refused. To delete instead, remove them yourself:
+
+```bash
+mylib leftovers --print0 | xargs -0 rm -r --
+```
+
+Only folders a run moved files out of qualify. A folder a torrent still lists is shown
+apart and left out of `--print0`: remove the torrent first. If Transmission cannot be
+reached, nothing is suggested. `mylib undo` recreates a removed folder if needed.
+
 **Downloads in progress:** with `[transmission]` enabled, every file in an unfinished
 torrent is skipped by the scan, ignored by the plan, and refused by `apply`, even when
 paused or stalled, and it is picked up once the torrent finishes. If Transmission cannot

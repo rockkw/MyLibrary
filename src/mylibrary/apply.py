@@ -17,7 +17,7 @@ import fcntl
 import json
 import os
 
-from . import downloads, safefs
+from . import downloads, leftovers, safefs
 from .db import now
 from .scan import SAFETY_DIR, count_files
 
@@ -217,10 +217,64 @@ def verify(con, run_id, log=print) -> dict:
             "counts_before": before, "counts_after": after}
 
 
+def clean_leftovers(con, cfg, paths, execute=False, log=print) -> dict:
+    """Move approved leftover folders into the run's safety folder. Nothing is deleted.
+
+    Only a folder the report suggests right now can move, so a stale page or a folder
+    that gained a file since it was approved is refused. undo() puts them back.
+    """
+    report = leftovers.find(con, cfg)
+    if report["error"]:
+        log(f"{report['error']}; nothing moved")
+        return {"error": report["error"], "moved": 0, "refused": []}
+    allowed = {i["path"]: i for i in report["empty"] + report["leftovers"]}
+    ready = [allowed[p] for p in dict.fromkeys(paths) if p in allowed]
+    refused = [{"path": p, "reason": "not a current suggestion"} for p in paths if p not in allowed]
+    log(f"{len(ready)} folders ready, {len(refused)} refused")
+    for r in refused:
+        log(f"  refused: {r['path']}: {r['reason']}")
+    if not execute:
+        log("DRY RUN: nothing was changed. Re-run with --execute to move them aside.")
+        return {"dry_run": True, "count": len(ready), "refused": refused, "moved": 0}
+    if not ready:
+        log("nothing to move")
+        return {"dry_run": False, "moved": 0, "refused": refused}
+    roots = [str(r) for r in cfg.roots]
+    with _lock(cfg):
+        counts = {r: count_files(r) for r in roots}
+        run_id = con.execute("""INSERT INTO runs (kind, started_at, status, counts_before)
+                                VALUES ('cleanup', ?, 'running', ?)""",
+                             (now(), json.dumps(counts))).lastrowid
+        moved = 0
+        for item in ready:
+            src = item["path"]
+            root = leftovers.root_of(src, roots)
+            dst = os.path.join(root, SAFETY_DIR, f"run-{run_id}", "leftovers",
+                               os.path.relpath(src, root))
+            st = os.lstat(src)
+            try:
+                safefs.safe_move(src, dst)
+                status, err = "moved", None
+                moved += 1
+                counts[root] -= len(item["files"])  # verify expects these to have left the count
+            except OSError as e:
+                status, err = "failed", str(e)
+                log(f"  ! {src}: {e}")
+            con.execute("""INSERT INTO moves (run_id, src, dst, inode, size, is_sidecar, status,
+                           error, at) VALUES (?,?,?,?,?,1,?,?,?)""",
+                        (run_id, src, dst, st.st_ino, st.st_size, status, err, now()))
+        con.execute("UPDATE runs SET finished_at=?, counts_before=? WHERE id=?",
+                    (now(), json.dumps(counts), run_id))
+        con.commit()
+    log(f"run #{run_id}: moved {moved} folders aside, undo with: mylib undo --run {run_id}")
+    rep = verify(con, run_id, log=log)
+    return {"dry_run": False, "run_id": run_id, "moved": moved, "refused": refused, "verify": rep}
+
+
 def undo(con, cfg, run_id, execute=False, log=print) -> dict:
     run = con.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
-    if not run or run["kind"] != "apply":
-        raise ValueError(f"run #{run_id} is not an apply run")
+    if not run or run["kind"] not in ("apply", "cleanup"):
+        raise ValueError(f"run #{run_id} is not an apply or cleanup run")
     moves = con.execute("SELECT * FROM moves WHERE run_id=? AND status='moved' ORDER BY id DESC",
                         (run_id,)).fetchall()
     ready, refused = [], []
@@ -245,12 +299,16 @@ def undo(con, cfg, run_id, execute=False, log=print) -> dict:
     with _lock(cfg):
         roots = sorted(json.loads(run["counts_before"] or "{}"))
         before = {r: count_files(r) for r in roots}
+        if run["kind"] == "cleanup":  # these files rejoin the count
+            for m in ready:
+                before[leftovers.root_of(m["src"], roots)] += count_files(m["dst"])
         uid = con.execute("""INSERT INTO runs (plan_id, kind, undo_of, started_at, status,
                              counts_before) VALUES (?, 'undo', ?, ?, 'running', ?)""",
                           (run["plan_id"], run_id, now(), json.dumps(before))).lastrowid
         done = 0
         for m in ready:
             try:
+                safefs.make_dirs(os.path.dirname(m["src"]))  # may have been cleaned up since
                 safefs.safe_move(m["dst"], m["src"])
                 status, err = "moved", None
                 done += 1

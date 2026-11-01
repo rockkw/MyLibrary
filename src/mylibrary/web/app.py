@@ -19,7 +19,7 @@ from pathlib import Path
 
 from flask import Flask, abort, jsonify, render_template, request
 
-from mylibrary import config, db, dupes, plan, review
+from mylibrary import config, db, dupes, leftovers, plan, review
 
 SRC = Path(__file__).resolve().parents[2]          # .../src
 app = Flask(__name__)
@@ -41,6 +41,8 @@ JOBS = {
     "verify":    (lambda p: ["verify", "--run", _int(p, "run")], "Verify run"),
     "undo_dry":  (lambda p: ["undo", "--run", _int(p, "run")], "Undo (dry run)"),
     "undo":      (lambda p: ["undo", "--run", _int(p, "run"), "--execute"], "Undo run"),
+    "leftovers_clean": (lambda p: ["leftovers", *_clean_args(p), "--execute"],
+                        "Move approved leftover folders aside"),
 }
 
 _jobs: dict[int, dict] = {}
@@ -53,6 +55,14 @@ def _int(params, key):
         return str(int(params[key]))
     except (KeyError, TypeError, ValueError):
         abort(400, f"{key} must be an integer")
+
+
+def _clean_args(params):
+    paths = params.get("paths")
+    if not (isinstance(paths, list) and paths and
+            all(isinstance(p, str) and p.startswith("/") for p in paths)):
+        abort(400, "paths must be a list of absolute paths")
+    return [arg for p in paths for arg in ("--clean", p)]
 
 
 def con():
@@ -148,6 +158,11 @@ def api_runs():
     rows = con().execute("""SELECT r.*, (SELECT COUNT(*) FROM moves m WHERE m.run_id=r.id
                             AND m.status='moved') moved FROM runs r ORDER BY id DESC LIMIT 100""")
     return jsonify([dict(r) for r in rows])
+
+
+@app.get("/api/leftovers")
+def api_leftovers():
+    return jsonify(leftovers.find(con(), CFG))
 
 
 @app.get("/api/dupes")

@@ -25,6 +25,7 @@ CHECKING = (1, 2)  # queued to verify, verifying
 class Active:
     paths: set[str] = field(default_factory=set)
     torrents: list[str] = field(default_factory=list)
+    held: dict[str, str] = field(default_factory=dict)  # every torrent's files: path -> torrent
     error: str | None = None
 
 
@@ -58,7 +59,7 @@ def _unfinished(t: dict) -> bool:
 
 
 def check(cfg, opener=urllib.request.urlopen) -> Active:
-    """Return unfinished torrents and their file paths. Disabled means nothing to report."""
+    """Return what the client holds and what is unfinished. Disabled means nothing to report."""
     if not cfg.transmission_enabled:
         return Active()
     try:
@@ -71,8 +72,13 @@ def check(cfg, opener=urllib.request.urlopen) -> Active:
         reason = getattr(e, "reason", e)
         return Active(error=f"cannot check downloads ({type(e).__name__}: {reason})"[:200])
     out = Active()
-    for t in filter(_unfinished, torrents):
-        out.torrents.append(t.get("name", "?"))
+    for t in torrents:
+        unfinished = _unfinished(t)
+        if unfinished:
+            out.torrents.append(t.get("name", "?"))
         for f in t.get("files", []):
-            out.paths.add(os.path.normpath(os.path.join(t.get("downloadDir", ""), f["name"])))
+            path = os.path.normpath(os.path.join(t.get("downloadDir", ""), f["name"]))
+            out.held[path] = t.get("name", "?")
+            if unfinished:
+                out.paths.add(path)
     return out

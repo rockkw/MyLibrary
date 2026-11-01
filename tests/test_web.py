@@ -1,4 +1,5 @@
 import importlib
+from pathlib import Path
 import sys
 import time
 
@@ -89,4 +90,47 @@ def test_edit_music_and_software_through_api(client, extra, expected, cli):
     assert r["status"] == "approved" and expected in r["dst"] and cli in r["cli"]
     item = client.get(f"/api/proposal/{pid}").get_json()
     assert item["kind"] == extra["kind"]
+
+
+def test_leftovers_page_reports_only(client, lib):
+    con, cfg = lib["con"], lib["cfg"]
+    from mylibrary import apply, plan
+    apply.apply_plan(con, cfg, plan.current_plan(con), execute=True, log=lambda *a: None)
+    d = client.get("/api/leftovers").get_json()
+    assert d["error"] is None and str(lib["root"] / "incoming") in [
+        i["path"] for i in d["empty"] + d["leftovers"]]
+    assert client.post("/api/leftovers").status_code == 405
+
+
+def _applied(lib):
+    from mylibrary import apply, plan
+    apply.apply_plan(lib["con"], lib["cfg"], plan.current_plan(lib["con"]), execute=True,
+                     log=lambda *a: None)
+    return lib["root"] / "incoming"
+
+
+def test_approving_a_leftover_runs_the_cli_job_and_moves_it_aside(client, lib):
+    folder = _applied(lib)
+    r = client.post("/api/jobs", json={"name": "leftovers_clean",
+                                       "params": {"paths": [str(folder)]}}).get_json()
+    assert "--execute" in r["cli"] and "--clean" in r["cli"]
+    for _ in range(100):
+        job = client.get(f"/api/jobs/{r['id']}").get_json()
+        if job["state"] != "running":
+            break
+        time.sleep(0.1)
+    assert job["state"] == "done" and not folder.exists()
+    assert client.get("/api/runs").get_json()[0]["kind"] == "cleanup"
+
+
+@pytest.mark.parametrize("params", [{}, {"paths": []}, {"paths": "x"}, {"paths": ["relative"]},
+                                    {"paths": ["--execute"]}, {"paths": [1]}])
+def test_leftover_job_rejects_bad_paths(client, params):
+    r = client.post("/api/jobs", json={"name": "leftovers_clean", "params": params})
+    assert r.status_code == 400
+
+
+def test_web_never_deletes(client):
+    src = (Path(sys.modules["mylibrary.web.app"].__file__)).read_text()
+    assert "clean_leftovers" not in src
 

@@ -19,7 +19,9 @@ overwrite a file.**
   writes decisions to SQLite and launches whitelisted `mylib` CLI jobs.
 - LLM output is a suggestion only (JSON, no tools). Confidence capped at 0.85 so
   LLM-only answers always need human review unless the offline IMDb check confirms.
-- Duplicates and empty folders: report only. Snapshot folders
+- Duplicates and empty or leftover folders: report only. `mylib leftovers` suggests. Approving
+  one moves it aside with `safe_move` into `.mylibrary-safety/run-N/leftovers/`, and undo
+  restores it. Never delete it. No Python file may contain the removal command. Snapshot folders
   (`<root>/.mylibrary-safety/run-N/`) are removed by the user, never by code.
 - Episodes skip the LLM and IMDb check. Without one season and one episode number they
   have no target and go to review; multi-episode files always go to review.

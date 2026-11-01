@@ -15,6 +15,8 @@
   mylib verify --run N
   mylib undo --run N              dry run; add --execute to reverse a run
   mylib runs | status | dupes
+  mylib leftovers [--print0]      folders moves left behind; report only
+  mylib leftovers --clean PATH    dry run; add --execute to move it aside (never deleted)
   mylib imdb-import FILE          optional offline IMDb title data
   mylib serve                     start the review UI (default http://127.0.0.1:5051)
 
@@ -26,7 +28,7 @@ import json
 import sys
 
 from . import __version__, apply as applymod, classify, config, db, downloads, dupes, imdb
-from . import parse, plan, review, scan
+from . import leftovers, parse, plan, review, scan
 
 
 def main(argv=None):
@@ -63,6 +65,10 @@ def main(argv=None):
     p = sub.add_parser("undo"); p.add_argument("--run", type=int, required=True)
     p.add_argument("--execute", action="store_true")
     sub.add_parser("runs"); sub.add_parser("status"); sub.add_parser("dupes")
+    p = sub.add_parser("leftovers")
+    p.add_argument("--print0", action="store_true", help="NUL-separated paths, for xargs -0")
+    p.add_argument("--clean", action="append", metavar="PATH", help="folder to move aside")
+    p.add_argument("--execute", action="store_true", help="actually move --clean folders")
     p = sub.add_parser("imdb-import"); p.add_argument("file")
     sub.add_parser("serve")
 
@@ -146,6 +152,27 @@ def main(argv=None):
                 f"keep? {g['best']}")
             for f in g["files"][1:]:
                 log(f"      also: {f['path']}")
+    elif a.cmd == "leftovers" and a.clean:
+        res = applymod.clean_leftovers(con, cfg, a.clean, execute=a.execute, log=log)
+        if res.get("error"):
+            return 1
+    elif a.cmd == "leftovers":
+        res = leftovers.find(con, cfg)
+        if res["error"]:
+            sys.exit(f"{res['error']}; not suggesting anything")
+        if a.print0:
+            sys.stdout.write("".join(i["path"] + "\0" for i in res["empty"] + res["leftovers"]))
+            return 0
+        log(f"{len(res['empty'])} empty, {len(res['leftovers'])} leftovers only, "
+            f"{len(res['held'])} still listed by a torrent. Nothing has been removed.")
+        for label, group in (("empty", "empty"), ("leftovers", "leftovers"),
+                             ("in torrent", "held")):
+            for i in res[group]:
+                log(f"  [{label}] {i['path']}  ({i['size'] / 1e6:.1f} MB)")
+                if i.get("torrent"):
+                    log(f"      remove from the client first: {i['torrent']}")
+                for f in i["files"]:
+                    log(f"      {f['name']}  ({f['size'] / 1e3:.0f} KB)")
     elif a.cmd == "imdb-import":
         res = {"rows": imdb.import_basics(con, a.file, log=log)}
     if a.json:

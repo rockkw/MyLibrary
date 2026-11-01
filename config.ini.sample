@@ -39,6 +39,9 @@ ignore_words = sample,trailer
 min_duration_minutes = 40
 ; Files changed this recently go to review, not auto: they may still be downloading
 settle_minutes = 10
+; mylib leftovers: a folder holding only these, each under leftover_max_mb, can be suggested
+leftover_extensions = txt,nfo,jpg,jpeg,png,gif,bmp,url,lnk,website,sfv,md5,srr
+leftover_max_mb = 5
 
 [ollama]
 enabled = true

@@ -241,12 +241,12 @@ async function loadRuns() {
   const runs = await api('/api/runs');
   $('#runs').innerHTML = runs.length ? `<table><tr><th>Run</th><th>Kind</th><th>Plan</th>
     <th>Started</th><th>Moved</th><th>Status</th><th>Verify</th><th></th></tr>` + runs.map(r => `
-    <tr><td>#${r.id}</td><td>${r.kind}${r.undo_of ? ` of #${r.undo_of}` : ''}</td><td>#${r.plan_id}</td>
+    <tr><td>#${r.id}</td><td>${r.kind}${r.undo_of ? ` of #${r.undo_of}` : ''}</td><td>${r.plan_id ? `#${r.plan_id}` : '—'}</td>
     <td>${esc(r.started_at)}</td><td>${r.moved}</td><td><span class="pill ${r.status === 'ok' ? 'done' :
     r.status === 'running' ? 'running' : 'error'}">${r.status}</span></td>
     <td>${r.verify_ok ? '✓' : (r.verify_report && r.verify_report !== '[]' ? esc(r.verify_report) : '')}</td>
     <td><button class="act" data-run="${r.id}" data-j="verify">Verify</button>
-    ${r.kind === 'apply' ? `<button class="act" data-run="${r.id}" data-j="undo_dry">Undo (dry)</button>
+    ${['apply', 'cleanup'].includes(r.kind) ? `<button class="act" data-run="${r.id}" data-j="undo_dry">Undo (dry)</button>
       <button class="act skip" data-run="${r.id}" data-j="undo">Undo</button>` : ''}</td></tr>`).join('') +
     '</table>' : '<p class="empty">No runs yet.</p>';
   $$('#runs [data-j]').forEach(b => b.onclick = async () => {
@@ -261,6 +261,40 @@ const pending = {};
 function confirmUndo(id) {
   if (pending[id] && Date.now() - pending[id] < 4000) { delete pending[id]; return true; }
   pending[id] = Date.now(); note(`Click Undo again to reverse run #${id}`); return false;
+}
+function leftoverCard(i, label) {
+  const box = i.torrent ? '' : `<input type="checkbox" class="leftover" data-path="${esc(i.path)}"> `;
+  return `<div class="card"><h3><label>${box}${esc(i.path)}</label></h3><span class="chip">${label}</span>
+    <span class="chip">${fmtSize(i.size)}</span>
+    ${i.torrent ? `<div class="reason">Remove from Transmission first: ${esc(i.torrent)}</div>` : ''}
+    ${i.files.map(f => `<div class="from">${esc(f.name)} · ${fmtSize(f.size)}</div>`).join('')}</div>`;
+}
+async function loadLeftovers() {
+  const d = await api('/api/leftovers');
+  if (d.error) {
+    $('#leftovers').innerHTML = `<p class="empty">${esc(d.error)}: not suggesting anything.</p>`;
+    return;
+  }
+  const cards = d.empty.map(i => leftoverCard(i, 'empty')).join('') +
+    d.leftovers.map(i => leftoverCard(i, 'leftovers only')).join('') +
+    d.held.map(i => leftoverCard(i, 'in torrent')).join('');
+  const ready = d.empty.length + d.leftovers.length;
+  const bar = ready ? `<div class="btnrow"><button class="btn" id="left-all">Select all</button>
+    <button class="btn go" id="left-go" disabled>Approve selected</button></div>
+    <pre id="left-log" class="cli"></pre>` : '';
+  $('#leftovers').innerHTML = cards ? bar + cards : '<p class="empty">No leftover folders.</p>';
+  if (!ready) return;
+  const boxes = $$('.leftover');
+  const sync = () => { $('#left-go').disabled = !boxes.some(b => b.checked); };
+  boxes.forEach(b => b.onchange = sync);
+  $('#left-all').onclick = () => { boxes.forEach(b => b.checked = true); sync(); };
+  $('#left-go').onclick = async () => {
+    const paths = boxes.filter(b => b.checked).map(b => b.dataset.path);
+    if (!confirm(`Move ${paths.length} folder(s) to .mylibrary-safety?`)) return;
+    const log = $('#left-log');
+    const j = await startJob('leftovers_clean', {paths}, log);
+    if (j && j.state === 'done') { note(`Moved ${paths.length} folder(s) aside`); loadLeftovers(); }
+  };
 }
 async function loadDupes() {
   const d = await api('/api/dupes');
@@ -278,6 +312,7 @@ function showPage(p) {
   $$('.nav-link').forEach(el => el.classList.toggle('active', el.dataset.page === p));
   if (p === 'runs') loadRuns();
   if (p === 'dupes') loadDupes();
+  if (p === 'leftovers') loadLeftovers();
 }
 window.onhashchange = () => showPage(location.hash.slice(1) || 'review');
 $('#status-list').onclick = e => { const it = e.target.closest('[data-s]');
