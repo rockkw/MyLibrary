@@ -34,8 +34,12 @@ def decide(con, proposal_ids, action: str) -> int:
     return n
 
 
-def edit(con, cfg, proposal_id: int, title: str, year: int | None) -> dict:
-    """Set a manual identification and recompute the target. Approves if no conflict."""
+def edit(con, cfg, proposal_id: int, title: str, year: int | None,
+         edition: str | None = None) -> dict:
+    """Set a manual identification and recompute the target. Approves if no conflict.
+
+    edition=None keeps the current edition; "" clears it.
+    """
     p = con.execute("SELECT * FROM proposals WHERE id=?", (proposal_id,)).fetchone()
     if not p:
         raise ValueError(f"no proposal #{proposal_id}")
@@ -43,10 +47,14 @@ def edit(con, cfg, proposal_id: int, title: str, year: int | None) -> dict:
         raise ValueError("already applied")
     f = con.execute("SELECT * FROM files WHERE id=?", (p["file_id"],)).fetchone()
     title = (title or "").strip()
-    con.execute("""UPDATE parses SET title=?, year=?, kind='movie', source='manual',
+    if edition is None:
+        cur = con.execute("SELECT edition FROM parses WHERE file_id=?", (f["id"],)).fetchone()
+        edition = cur["edition"] if cur else None
+    edition = (edition or "").strip() or None
+    con.execute("""UPDATE parses SET title=?, year=?, edition=?, kind='movie', source='manual',
                    confidence=1.0, flagged=0, updated_at=? WHERE file_id=?""",
-                (title, year, now(), f["id"]))
-    dst = target_for(cfg, f, title, year)
+                (title, year, edition, now(), f["id"]))
+    dst = target_for(cfg, f, title, year, edition)
     clash = con.execute("""SELECT id FROM proposals WHERE plan_id=? AND dst=? AND id<>?
                            AND status NOT IN ('ignored','noop','skipped')""",
                         (p["plan_id"], dst, proposal_id)).fetchone()
@@ -68,7 +76,7 @@ def edit(con, cfg, proposal_id: int, title: str, year: int | None) -> dict:
 
 def list_proposals(con, plan_id, status=None, q=None, root=None, limit=500, offset=0):
     sql = """SELECT pr.*, f.size, f.duration, f.width, f.height, f.vcodec, f.acodec,
-                    f.audio_langs, f.sub_langs, f.root, p.title, p.year, p.kind, p.source,
+                    f.audio_langs, f.sub_langs, f.root, p.title, p.year, p.edition, p.kind, p.source,
                     p.imdb_id
              FROM proposals pr JOIN files f ON f.id=pr.file_id
              LEFT JOIN parses p ON p.file_id=f.id WHERE pr.plan_id=?"""
@@ -89,7 +97,8 @@ def list_proposals(con, plan_id, status=None, q=None, root=None, limit=500, offs
 
 
 def detail(con, proposal_id):
-    r = con.execute("""SELECT pr.*, f.*, p.title, p.year, p.kind, p.source, p.confidence AS p_conf,
+    r = con.execute("""SELECT pr.*, f.*, p.title, p.year, p.edition, p.kind, p.source,
+                              p.confidence AS p_conf,
                               p.reasons AS p_reasons, p.guessit_json, p.llm_json, p.imdb_id,
                               pr.id AS proposal_id, pr.status AS status, pr.reason AS reason,
                               pr.confidence AS confidence

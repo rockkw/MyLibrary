@@ -51,7 +51,7 @@ class Config:
     log_dir: Path
     roots: list[Path]
     movies_dir: str = "Movies"
-    layout: str = "{title} ({year})/{title} ({year}){quality}"
+    layout: str = "{title} ({year})/{title} ({year}){edition}{quality}"
     video_ext: set[str] = field(default_factory=set)
     sidecar_ext: set[str] = field(default_factory=set)
     ignore_words: list[str] = field(default_factory=list)
@@ -86,7 +86,7 @@ def load(path: str | os.PathLike | None = None) -> Config:
         log_dir=Path(get("paths", "log_dir", "${HOME}/.mylibrary/logs")),
         roots=[Path(p) for p in _list(cp.get("library", "roots", fallback=""))],
         movies_dir=get("library", "movies_dir", "Movies"),
-        layout=get("library", "layout", "{title} ({year})/{title} ({year}){quality}"),
+        layout=get("library", "layout", "{title} ({year})/{title} ({year}){edition}{quality}"),
         video_ext={e.lower().lstrip(".") for e in _list(cp.get(
             "library", "video_extensions",
             fallback="mkv,mp4,m4v,avi,mov,wmv,mpg,mpeg,ts,m2ts,webm,iso"))},

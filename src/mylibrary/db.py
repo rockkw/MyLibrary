@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS parses (
     file_id     INTEGER PRIMARY KEY REFERENCES files(id),
     title       TEXT,
     year        INTEGER,
+    edition     TEXT,           -- Director's Cut, Final Cut, ...
     kind        TEXT,           -- movie | episode | extra | sample | unknown
     source      TEXT,           -- guessit | llm | manual
     confidence  REAL,
@@ -112,6 +113,8 @@ def connect(db_file: Path) -> sqlite3.Connection:
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("PRAGMA foreign_keys=ON")
     con.executescript(SCHEMA)
+    if "edition" not in {r["name"] for r in con.execute("PRAGMA table_info(parses)")}:
+        con.execute("ALTER TABLE parses ADD COLUMN edition TEXT")
     return con
 
 

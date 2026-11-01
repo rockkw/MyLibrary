@@ -26,11 +26,13 @@ def quality(height) -> str:
     return ""
 
 
-def target_for(cfg, f, title, year) -> str | None:
+def target_for(cfg, f, title, year, edition=None) -> str | None:
     if not title:
         return None
     layout = cfg.layout if year else cfg.layout.replace(" ({year})", "").replace("({year})", "")
-    rel = layout.format(title=clean(title), year=year or "", quality=quality(f["height"]))
+    edition = clean(edition or "")
+    rel = layout.format(title=clean(title), year=year or "", quality=quality(f["height"]),
+                        edition=f" - {edition}" if edition else "")
     ext = os.path.splitext(f["path"])[1].lower()
     return os.path.join(f["root"], cfg.movies_dir, rel + ext)
 
@@ -68,13 +70,13 @@ def make_plan(con, cfg, note="", log=print) -> dict:
     plan_id = con.execute("INSERT INTO plans (created_at, note) VALUES (?,?)",
                           (now(), note)).lastrowid
 
-    rows = con.execute("""SELECT f.*, p.title, p.year, p.kind, p.source, p.confidence,
+    rows = con.execute("""SELECT f.*, p.title, p.year, p.edition, p.kind, p.source, p.confidence,
                                  p.reasons, p.file_id
                           FROM files f JOIN parses p ON p.file_id=f.id
                           WHERE f.missing=0 ORDER BY f.path""").fetchall()
     claimed, counts = {}, {}
     for r in rows:
-        dst = target_for(cfg, r, r["title"], r["year"])
+        dst = target_for(cfg, r, r["title"], r["year"], r["edition"])
         conf, notes, im = score(con, cfg, r, r)
         if im.get("tconst"):
             con.execute("UPDATE parses SET imdb_id=? WHERE file_id=?", (im["tconst"], r["id"]))

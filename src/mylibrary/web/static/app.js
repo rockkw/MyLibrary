@@ -60,7 +60,7 @@ function renderList() {
       <input type="checkbox" data-id="${r.id}" ${state.checked.has(r.id) ? 'checked' : ''}>
       <span class="conf ${confClass(r.confidence)}">${(r.confidence ?? 0).toFixed(2)}</span>
       <span class="pill ${r.status}">${r.status}</span>
-      <div class="names"><div class="to">${to}${res ? `<span class="chip">${res}</span>` : ''}
+      <div class="names"><div class="to">${to}${r.edition ? `<span class="chip">${esc(r.edition)}</span>` : ''}${res ? `<span class="chip">${res}</span>` : ''}
         ${r.vcodec ? `<span class="chip">${esc(r.vcodec)}</span>` : ''}
         ${r.source ? `<span class="chip">${esc(r.source)}</span>` : ''}</div>
         <div class="from">${esc(base(r.src))}</div></div></div>`;
@@ -75,7 +75,7 @@ async function loadDetail() {
   const d = await api('/api/proposal/' + item.id);
   const decidable = !['applied', 'noop', 'ignored'].includes(d.status);
   $('#detail-pane').innerHTML = `
-    <h2>${d.title ? esc(d.title) + (d.year ? ` (${d.year})` : '') : 'Unidentified file'}</h2>
+    <h2>${d.title ? esc(d.title) + (d.year ? ` (${d.year})` : '') + (d.edition ? ` - ${esc(d.edition)}` : '') : 'Unidentified file'}</h2>
     <span class="pill ${d.status}">${d.status}</span>
     <span class="conf ${confClass(d.confidence)}" style="padding:0 .4rem;margin-left:.3rem">
       ${(d.confidence ?? 0).toFixed(2)}</span>
@@ -88,14 +88,15 @@ async function loadDetail() {
     ${decidable ? `
     <div class="detail-label">Identify</div>
     <div class="edit"><input id="ed-title" value="${esc(d.title || '')}" placeholder="Title">
-      <input id="ed-year" value="${d.year || ''}" placeholder="Year"></div>
+      <input id="ed-year" value="${d.year || ''}" placeholder="Year">
+      <input id="ed-edition" value="${esc(d.edition || '')}" placeholder="Edition (optional)"></div>
     <div class="btnrow">
       <button class="btn go" id="ed-save">Save & approve (e)</button>
       <button class="btn ok" data-dec="approve">Approve (a)</button>
       <button class="btn no" data-dec="skip">Skip (s)</button>
       ${['approved', 'skipped'].includes(d.status) ? '<button class="btn" data-dec="reset">Reset</button>' : ''}
     </div>
-    <div class="cli">mylib approve ${d.proposal_id} · mylib edit ${d.proposal_id} --title "…" --year …</div>` : ''}
+    <div class="cli">mylib approve ${d.proposal_id} · mylib edit ${d.proposal_id} --title "…" --year … --edition "…"</div>` : ''}
     <div class="detail-label">Media</div>
     <div class="info">
       <span>Size</span><span>${fmtSize(d.size || 0)}</span>
@@ -110,14 +111,15 @@ async function loadDetail() {
   $$('[data-dec]').forEach(b => b.onclick = () => decide([d.proposal_id], b.dataset.dec));
   const save = $('#ed-save');
   if (save) save.onclick = saveEdit;
-  $$('#ed-title, #ed-year').forEach(el => el.onkeydown = e => {
+  $$('#ed-title, #ed-year, #ed-edition').forEach(el => el.onkeydown = e => {
     if (e.key === 'Enter') saveEdit(); e.stopPropagation(); });
 }
 async function saveEdit() {
   const item = state.items[state.cur];
   try {
     const r = await api('/api/edit', {id: item.id, title: $('#ed-title').value,
-                                      year: $('#ed-year').value});
+                                      year: $('#ed-year').value,
+                                      edition: $('#ed-edition').value});
     note(`${r.cli} → ${r.status}`);
     await refresh(true);
   } catch (e) { note(e.message, true); }
@@ -218,7 +220,7 @@ async function loadDupes() {
   const d = await api('/api/dupes');
   const ex = d.exact.map(g => `<div class="card"><h3>Identical files (${fmtSize(g.size)})</h3>
     ${g.files.map(f => `<div>${esc(f)}</div>`).join('')}</div>`).join('');
-  const sm = d.same_movie.map(g => `<div class="card"><h3>${esc(g.title)} (${g.year ?? '?'})</h3>
+  const sm = d.same_movie.map(g => `<div class="card"><h3>${esc(g.title)} (${g.year ?? '?'})${g.edition ? ` - ${esc(g.edition)}` : ''}</h3>
     ${g.files.map((f, i) => `<div class="${i ? '' : 'best'}">${i ? '' : '★ '}${f.height || '?'}p
     ${esc(f.vcodec || '')} ${fmtSize(f.size)} — ${esc(f.path)}</div>`).join('')}</div>`).join('');
   $('#dupes').innerHTML = (ex || sm) ? ex + sm : '<p class="empty">No duplicates found.</p>';

@@ -7,6 +7,7 @@ Manual (human) identifications are never overwritten.
 import json
 import os
 import re
+import string
 
 from guessit import guessit
 
@@ -14,6 +15,14 @@ from .db import now
 
 GENERIC = {"movie", "video", "film", "final", "cut", "untitled", "new", "copy",
            "output", "export", "clip", "vts", "title", "main", "feature", "disc"}
+
+# guessit's bare edition names, spelled out for the file name.
+EDITION_LABELS = {"Collector": "Collector's Edition", "Deluxe": "Deluxe Edition",
+                  "Extended": "Extended Edition", "Fan": "Fan Edit",
+                  "Limited": "Limited Edition", "Special": "Special Edition",
+                  "Theatrical": "Theatrical Cut", "Ultimate": "Ultimate Edition"}
+# guessit reports "Final Cut", "Redux" etc. as an alternative title, not an edition.
+ALT_EDITION = re.compile(r"\b(cut|edition|version)$|^redux$", re.I)
 
 
 def _guess(text: str) -> dict:
@@ -23,12 +32,26 @@ def _guess(text: str) -> dict:
         return {}
     out = {}
     for k, v in g.items():
-        out[k] = v if isinstance(v, (str, int, float, bool, type(None))) else str(v)
+        if k in ("edition", "alternative_title") and isinstance(v, list):
+            out[k] = [str(x) for x in v]
+        else:
+            out[k] = v if isinstance(v, (str, int, float, bool, type(None))) else str(v)
     return out
 
 
+def _as_list(v) -> list:
+    return v if isinstance(v, list) else [v] if v else []
+
+
+def edition_of(g: dict) -> str | None:
+    labels = [EDITION_LABELS.get(e, e) for e in _as_list(g.get("edition"))]
+    labels += [string.capwords(a) for a in _as_list(g.get("alternative_title"))
+               if ALT_EDITION.search(a)]
+    return " - ".join(dict.fromkeys(labels)) or None
+
+
 def identify(path: str, duration: float | None, cfg) -> dict:
-    """Return {title, year, kind, confidence, flagged, reasons, guessit}."""
+    """Return {title, year, edition, kind, confidence, flagged, reasons, guessit}."""
     name = os.path.basename(path)
     parent = os.path.basename(os.path.dirname(path))
     g_file = _guess(name)
@@ -43,6 +66,10 @@ def identify(path: str, duration: float | None, cfg) -> dict:
 
     title = (g.get("title") or "").strip()
     year = g.get("year") if isinstance(g.get("year"), int) else None
+    edition = edition_of(g_file)
+    # Only a folder naming this one film, so "Directors Cuts/" doesn't label everything in it.
+    if not edition and g_dir.get("title") and year and g_dir.get("year") == year:
+        edition = edition_of(g_dir)
     kind = "movie"
     conf = 0.95
 
@@ -75,6 +102,7 @@ def identify(path: str, duration: float | None, cfg) -> dict:
     return {
         "title": title or None,
         "year": year,
+        "edition": edition,
         "kind": kind,
         "confidence": round(conf, 2),
         "flagged": int(conf < cfg.auto_approve and kind in ("movie", "episode")),
@@ -100,15 +128,15 @@ def parse_all(con, cfg, redo=False, log=print) -> dict:
             continue
         info = identify(r["path"], r["duration"], cfg)
         con.execute("""
-            INSERT INTO parses (file_id, title, year, kind, source, confidence, flagged,
-                                reasons, guessit_json, llm_json, updated_at)
-            VALUES (?,?,?,?, 'guessit', ?,?,?,?, NULL, ?)
+            INSERT INTO parses (file_id, title, year, edition, kind, source, confidence,
+                                flagged, reasons, guessit_json, llm_json, updated_at)
+            VALUES (?,?,?,?,?, 'guessit', ?,?,?,?, NULL, ?)
             ON CONFLICT(file_id) DO UPDATE SET title=excluded.title, year=excluded.year,
-                kind=excluded.kind, source='guessit', confidence=excluded.confidence,
+                edition=excluded.edition, kind=excluded.kind, source='guessit', confidence=excluded.confidence,
                 flagged=excluded.flagged, reasons=excluded.reasons,
                 guessit_json=excluded.guessit_json, llm_json=NULL, imdb_id=NULL,
                 updated_at=excluded.updated_at
-        """, (r["id"], info["title"], info["year"], info["kind"], info["confidence"],
+        """, (r["id"], info["title"], info["year"], info["edition"], info["kind"], info["confidence"],
               info["flagged"], info["reasons"], json.dumps(info["guessit"]), now()))
         stats["parsed"] += 1
         stats["flagged"] += info["flagged"]

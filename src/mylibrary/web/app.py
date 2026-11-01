@@ -120,11 +120,13 @@ def api_edit():
     year = body.get("year")
     year = int(year) if str(year or "").strip().isdigit() else None
     try:
-        res = review.edit(con(), CFG, int(body["id"]), body.get("title", ""), year)
+        res = review.edit(con(), CFG, int(body["id"]), body.get("title", ""), year,
+                          body.get("edition"))
     except ValueError as e:
         abort(400, str(e))
     res["cli"] = f'mylib edit {res["id"]} --title "{body.get("title","")}"' + \
-        (f" --year {year}" if year else "")
+        (f" --year {year}" if year else "") + \
+        (f' --edition "{body["edition"]}"' if body.get("edition") else "")
     return jsonify(res)
 
 

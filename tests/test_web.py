@@ -44,3 +44,14 @@ def test_dry_run_job_changes_nothing(client, lib):
         time.sleep(0.1)
     assert s["state"] == "done"
     assert (lib["root"] / "incoming/The.Matrix.1999.1080p.BluRay.x264-GRP.mkv").exists()
+
+
+def test_edit_sets_edition(client):
+    rows = client.get("/api/proposals?status=auto").get_json()
+    rows = rows["items"] if isinstance(rows, dict) else rows
+    row = next(r for r in rows if "alien.dc" in r["src"])
+    assert row["edition"] == "Director's Cut"
+    res = client.post("/api/edit", json={"id": row["id"], "title": "Alien", "year": 1979,
+                                         "edition": "Final Cut"}).get_json()
+    assert res["dst"].endswith("Alien (1979) - Final Cut.mkv")
+    assert '--edition "Final Cut"' in res["cli"]

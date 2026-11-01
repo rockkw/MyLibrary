@@ -14,8 +14,9 @@ roots =
     /mnt/ssd2
     /mnt/ssd3
 movies_dir = Movies
-; Jellyfin naming: Movies/Title (Year)/Title (Year) - 1080p.mkv
-layout = {title} ({year})/{title} ({year}){quality}
+; Jellyfin naming: Movies/Title (Year)/Title (Year) - Director's Cut - 1080p.mkv
+; {edition} and {quality} are empty when unknown
+layout = {title} ({year})/{title} ({year}){edition}{quality}
 video_extensions = mkv,mp4,m4v,avi,mov,wmv,mpg,mpeg,ts,m2ts,webm,iso
 ; Moved alongside the video when they share its file name stem
 sidecar_extensions = srt,sub,idx,ass,ssa,vtt,nfo

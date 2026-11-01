@@ -110,6 +110,7 @@ code, .mono { font-family: ui-monospace, Menlo, monospace; }
 .edit { display: grid; grid-template-columns: 1fr 80px; gap: 0.4rem; }
 .edit input { background: #111; border: 1px solid #444; color: #eee; padding: 0.4rem 0.55rem;
   border-radius: 4px; font-size: 0.85rem; }
+#ed-edition { grid-column: 1 / -1; }
 .edit input:focus { outline: none; border-color: #f90; }
 .btnrow { display: flex; gap: 0.5rem; margin-top: 0.7rem; flex-wrap: wrap; }
 .btn { cursor: pointer; border-radius: 4px; padding: 0.4rem 0.9rem; font-size: 0.82rem;

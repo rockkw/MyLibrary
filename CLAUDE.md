@@ -3,7 +3,7 @@
 Local, LLM-assisted movie library organizer for Rock's home media server
 (Ubuntu box, SSD1/SSD2/SSD3 on an OWC Thunderbolt dock, Jellyfin, Ollama on an
 RTX 5080). Renames messy movie files into Jellyfin layout
-`Movies/Title (Year)/Title (Year) - 1080p.ext`. **It must never delete or
+`Movies/Title (Year)/Title (Year) - Director's Cut - 1080p.ext`. **It must never delete or
 overwrite a file.**
 
 ## Hard rules (do not break, do not weaken tests to make a change pass)
@@ -33,7 +33,7 @@ overwrite a file.**
 ```
 src/mylibrary/   config db scan parse classify imdb plan review apply safefs dupes cli
 src/mylibrary/web/  Flask UI (MyMagnet look: #111 bg, #f90 amber, three panes)
-tests/           pytest (25 tests)
+tests/           pytest (52 tests)
 infra/compose/   systemd user units (web service, nightly pipeline timer: no renames)
 mylib.py         run-from-repo shim
 ```
@@ -43,7 +43,7 @@ mylib.py         run-from-repo shim
 pip3 install -e ".[test]" --break-system-packages
 pytest -q
 mylib pipeline        # scan + parse + classify + plan
-mylib review | approve ID | skip ID | edit ID --title T --year Y
+mylib review | approve ID | skip ID | edit ID --title T --year Y [--edition E]
 mylib apply           # dry run; --execute to rename (then auto-verify)
 mylib runs | verify --run N | undo --run N [--execute] | dupes | status
 mylib serve           # UI on http://127.0.0.1:5051
@@ -58,5 +58,4 @@ Use the `backlog` CLI for task changes rather than hand-editing task files.
 ## Status (2026-10-31)
 - v0.1.0 on GitHub, CI green. Not yet run on real drives.
 - Next: TASK-3 first real run on ONE SSD per `testing/plans/first-real-run-test-plan.md`.
-- Then: TASK-4 compare Ollama models, TASK-5 IMDb import, TASK-6 keep editions
-  (Director's Cut etc. currently dropped from names).
+- Then: TASK-4 compare Ollama models, TASK-5 IMDb import.

@@ -1,9 +1,12 @@
 import io
 import json
 import os
+import sqlite3
+
+import pytest
 
 from conftest import tree_digest
-from mylibrary import apply, classify, parse, plan, review, scan
+from mylibrary import apply, classify, db, dupes, parse, plan, review, scan
 
 
 def run_to_plan(lib):
@@ -35,7 +38,7 @@ def test_end_to_end_apply_verify_undo(lib):
     assert res["moved"] == 2 and res["verify"]["ok"]
     assert (root / "Movies/The Matrix (1999)/The Matrix (1999).mkv").exists()
     assert (root / "Movies/The Matrix (1999)/The Matrix (1999).en.srt").exists()
-    assert (root / "Movies/Alien (1979)/Alien (1979).mkv").exists()
+    assert (root / "Movies/Alien (1979)/Alien (1979) - Director's Cut.mkv").exists()
     assert (root / "misc/final_cut_v2.mp4").exists()          # unreviewed: untouched
     assert tree_digest(root) == before                         # nothing lost or altered
     snap = root / ".mylibrary-safety" / f"run-{res['run_id']}"
@@ -53,7 +56,7 @@ def test_rescan_after_apply_is_noop(lib):
     apply.apply_plan(con, cfg, p["plan_id"], execute=True, log=lambda *a: None)
     p2 = run_to_plan(lib)
     st = statuses(con, p2["plan_id"])
-    assert st["The Matrix (1999).mkv"] == "noop" and st["Alien (1979).mkv"] == "noop"
+    assert st["The Matrix (1999).mkv"] == "noop" and st["Alien (1979) - Director's Cut.mkv"] == "noop"
 
 
 def test_existing_target_is_conflict_and_untouched(lib):
@@ -111,6 +114,95 @@ def test_hostile_title_cannot_escape_root(lib):
         if r["dst"]:
             real = os.path.realpath(r["dst"])
             assert real.startswith(str(root / "Movies") + os.sep), (title, real)
+
+
+@pytest.mark.parametrize("name, edition", [
+    ("Alien.1979.Directors.Cut.1080p.BluRay.x264-GRP.mkv", "Director's Cut"),
+    ("Blade.Runner.1982.Final.Cut.1080p.mkv", "Final Cut"),
+    ("Apocalypse.Now.1979.Redux.mkv", "Redux"),
+    ("Aliens.1986.SE.720p.mkv", "Special Edition"),
+    ("Star.Wars.1977.Remastered.mkv", "Remastered"),
+    ("Movie.2000.Remastered.Directors.Cut.mkv", "Remastered - Director's Cut"),
+    ("Movie.2000.25th.Anniversary.Edition.mkv", "25th Anniversary Edition"),
+    ("Movie.2000.1080p.BluRay.mkv", None),
+    ("Kill.Bill.2003.The.Whole.Bloody.Affair.mkv", None),   # subtitle, not an edition
+    ("The.Final.Cut.2004.mkv", None),                       # the film's real title
+])
+def test_edition_from_filename(lib, name, edition):
+    assert parse.identify(f"/x/{name}", None, lib["cfg"])["edition"] == edition
+
+
+def test_edition_from_film_folder_only(lib):
+    cfg = lib["cfg"]
+    assert parse.identify("/x/Alien (1979) Directors Cut/alien.1979.mkv", None,
+                          cfg)["edition"] == "Director's Cut"
+    assert parse.identify("/x/Directors Cuts/alien.1979.mkv", None, cfg)["edition"] is None
+
+
+@pytest.mark.parametrize("edition", ["Director's Cut", "Final Cut", "Redux", "Special Edition",
+                                     "Extended Edition", "Collector's Edition", "Theatrical Cut",
+                                     "Fan Edit", "Remastered - Director's Cut",
+                                     "25th Anniversary Edition"])
+def test_edition_survives_its_own_target_name(lib, edition):
+    # otherwise every re-plan would propose another rename
+    name = f"Alien (1979) - {edition} - 1080p.mkv"
+    assert parse.identify(f"/x/Alien (1979)/{name}", None, lib["cfg"])["edition"] == edition
+
+
+def test_two_editions_do_not_conflict_or_count_as_duplicates(lib):
+    con, cfg, root = lib["con"], lib["cfg"], lib["root"]
+    (root / "dl").mkdir()
+    (root / "dl/Alien.1979.mkv").write_bytes(b"theatrical")
+    (root / "dl/Alien.1979.Final.Cut.mkv").write_bytes(b"final")
+    p = run_to_plan(lib)
+    assert p["counts"].get("conflict") is None
+    res = apply.apply_plan(con, cfg, p["plan_id"], execute=True, log=lambda *a: None)
+    assert res["verify"]["ok"]
+    folder = root / "Movies/Alien (1979)"
+    assert (folder / "Alien (1979).mkv").read_bytes() == b"theatrical"
+    assert (folder / "Alien (1979) - Final Cut.mkv").read_bytes() == b"final"
+    assert (folder / "Alien (1979) - Director's Cut.mkv").exists()
+    assert dupes.find(con)["same_movie"] == []
+
+
+def test_same_edition_twice_is_still_a_conflict_and_duplicate(lib):
+    con, root = lib["con"], lib["root"]
+    (root / "dl").mkdir()
+    (root / "dl/Alien.1979.Directors.Cut.mkv").write_bytes(b"other copy")
+    p = run_to_plan(lib)
+    assert p["counts"].get("conflict") == 1
+    assert [g["edition"] for g in dupes.find(con)["same_movie"]] == ["Director's Cut"]
+
+
+def test_edit_keeps_sets_and_clears_edition(lib):
+    con, cfg = lib["con"], lib["cfg"]
+    p = run_to_plan(lib)
+    pid = con.execute("SELECT id FROM proposals WHERE src LIKE '%alien.dc%'").fetchone()[0]
+    assert review.edit(con, cfg, pid, "Alien", 1979)["dst"].endswith(
+        "Alien (1979) - Director's Cut.mkv")
+    assert review.edit(con, cfg, pid, "Alien", 1979, "Final Cut")["dst"].endswith(
+        "Alien (1979) - Final Cut.mkv")
+    assert review.edit(con, cfg, pid, "Alien", 1979, "")["dst"].endswith("/Alien (1979).mkv")
+    assert statuses(con, p["plan_id"])["alien.dc.mkv"] == "approved"
+
+
+def test_hostile_edition_cannot_escape_root(lib):
+    con, cfg, root = lib["con"], lib["cfg"], lib["root"]
+    run_to_plan(lib)
+    pid = con.execute("SELECT id FROM proposals WHERE src LIKE '%alien.dc%'").fetchone()[0]
+    for edition in ("../../../etc/passwd", "..", "/abs/path", "{title}"):
+        dst = review.edit(con, cfg, pid, "Alien", 1979, edition)["dst"]
+        assert os.path.dirname(dst) == str(root / "Movies/Alien (1979)"), (edition, dst)
+
+
+def test_old_database_gains_edition_column(tmp_path):
+    f = tmp_path / "old.db"
+    old = sqlite3.connect(f)
+    old.execute("CREATE TABLE parses (file_id INTEGER PRIMARY KEY, title TEXT)")
+    old.commit()
+    old.close()
+    con = db.connect(f)
+    assert "edition" in {r["name"] for r in con.execute("PRAGMA table_info(parses)")}
 
 
 class FakeResp(io.BytesIO):

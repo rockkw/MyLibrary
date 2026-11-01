@@ -7,7 +7,7 @@
   mylib pipeline                  scan + parse + classify + plan
   mylib review [--status review]  list proposals
   mylib approve ID... | skip ID... | reset ID...
-  mylib edit ID --title T --year Y
+  mylib edit ID --title T --year Y [--edition E]
   mylib apply [--plan N]          dry run; add --execute to actually rename
   mylib verify --run N
   mylib undo --run N              dry run; add --execute to reverse a run
@@ -47,6 +47,7 @@ def main(argv=None):
         p = sub.add_parser(name); p.add_argument("ids", type=int, nargs="+")
     p = sub.add_parser("edit"); p.add_argument("id", type=int)
     p.add_argument("--title", required=True); p.add_argument("--year", type=int)
+    p.add_argument("--edition", help='e.g. "Final Cut"; "" clears it')
     p = sub.add_parser("apply"); p.add_argument("--plan", type=int)
     p.add_argument("--execute", action="store_true", help="actually rename files")
     p = sub.add_parser("verify"); p.add_argument("--run", type=int, required=True)
@@ -101,7 +102,7 @@ def main(argv=None):
         res = {"updated": n}
         log(f"{a.cmd}: {n} updated")
     elif a.cmd == "edit":
-        res = review.edit(con, cfg, a.id, a.title, a.year)
+        res = review.edit(con, cfg, a.id, a.title, a.year, a.edition)
         log(f"#{res['id']} {res['status']}: {res['dst']}")
     elif a.cmd == "apply":
         res = applymod.apply_plan(con, cfg, need_plan(), execute=a.execute, log=log)
@@ -128,7 +129,8 @@ def main(argv=None):
         log(f"{len(res['exact'])} exact duplicate groups, "
             f"{len(res['same_movie'])} movies with more than one file")
         for g in res["same_movie"]:
-            log(f"  {g['title']} ({g['year']}): keep? {g['best']}")
+            log(f"  {g['title']} ({g['year']}){' - ' + g['edition'] if g['edition'] else ''}: "
+                f"keep? {g['best']}")
             for f in g["files"][1:]:
                 log(f"      also: {f['path']}")
     elif a.cmd == "imdb-import":
