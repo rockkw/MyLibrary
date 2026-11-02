@@ -1,5 +1,8 @@
 """The whole library as a tree, marked with what the next apply would do. Read only.
 
+Video files carry a `play` path for the in-page player (player.py checks it again), and files
+that may be marked for trash carry `trash_ok`; marked files show state "trash" (TASK-31).
+
 The disk is the source, because the database tracks only media. Moves come from
 preflight.prepare, the same check apply runs, so this preview matches the dry run.
 Symlinks are listed but never followed.
@@ -7,7 +10,8 @@ Symlinks are listed but never followed.
 
 import os
 
-from . import downloads, preflight
+from . import downloads, preflight, trash
+from .player import NOT_PLAYABLE_EXT, ext_of
 from .config import has_ext
 from .scan import SAFETY_DIR
 
@@ -23,16 +27,29 @@ def group_of(name: str, cfg) -> str:
     return "software" if has_ext(name, cfg.software_ext) else "other"
 
 
+def playable(path: str, cfg) -> bool:
+    """Whether the tree offers to play this file. The player checks again before streaming."""
+    return has_ext(path, cfg.video_ext) and ext_of(path) not in NOT_PLAYABLE_EXT
+
+
 def _blank_dir(name: str, path: str, new: bool = False) -> dict:
     return {"type": "dir", "name": name, "path": path, "new": new, "children": [],
-            "counts": dict.fromkeys(GROUPS, 0), "in": 0, "out": 0, "left": False}
+            "counts": dict.fromkeys(GROUPS, 0), "in": 0, "out": 0, "trash": 0, "left": False}
+
+
+def _trash_marks(con, cfg, active) -> dict:
+    binned = trash.prepare(con, cfg, active)
+    out = {t["path"]: {"state": "trash", "reason": "moves to trash on apply"} for t in binned["ready"]}
+    out.update({t["path"]: {"state": "trash", "reason": f"apply refuses trash: {t['reason']}",
+                            "trash_refused": True} for t in binned["refused"]})
+    return out
 
 
 def _marks(con, cfg, plan_id, active) -> tuple[dict, list]:
     """Map each source path to its marker, and list every planned move."""
     marks, moves = {}, []
     if not plan_id:
-        return marks, moves
+        return _trash_marks(con, cfg, active), moves
     prep = preflight.prepare(con, cfg, plan_id, active)
     for r in con.execute("""SELECT id, src, status, reason FROM proposals WHERE plan_id=?""",
                          (plan_id,)):
@@ -48,6 +65,12 @@ def _marks(con, cfg, plan_id, active) -> tuple[dict, list]:
         for src, dst in [(m["src"], m["dst"])] + list(m["sidecars"]):
             marks[src] = {"state": "out", "to": dst, "proposal_id": m["proposal_id"]}
             moves.append((src, dst, m["proposal_id"]))
+    for path, mark in _trash_marks(con, cfg, active).items():
+        before = marks.get(path, {})
+        # What the row shows once the mark comes off; the plan holds marked files back.
+        was = {} if "marked for trash" in (before.get("reason") or "") else \
+            {"state": before.get("state", ""), "reason": before.get("reason")}
+        marks[path] = {**before, **mark, "was": was}
     return marks, moves
 
 
@@ -78,12 +101,21 @@ def _file(entry, ctx: dict) -> dict:
         node.update(state="downloading", reason="still downloading")
     elif entry.path in active.held:
         node["torrent"] = active.held[entry.path]
-    if not node["state"] and entry.path not in ctx["known"]:
-        node["state"] = "untracked"
+    in_safety = f"{os.sep}{SAFETY_DIR}{os.sep}" in entry.path
+    node["trash_ok"] = not (node["symlink"] or in_safety or active.error or node.get("torrent")
+                            or node["state"] == "downloading")
+    if entry.path not in ctx["known"]:
+        if not node["state"]:
+            node["state"] = "untracked"
+        elif node["state"] == "trash" and not node.get("was", {}).get("state"):
+            node["was"] = {"state": "untracked", "reason": None}
+    if node["group"] == "video" and not node["symlink"] and node["state"] != "downloading" \
+            and playable(entry.name, ctx["cfg"]) and f"{os.sep}{SAFETY_DIR}{os.sep}" not in entry.path:
+        node["play"] = entry.path
     return node
 
 
-def _add_incoming(root: dict, src: str, dst: str, proposal_id: int) -> None:
+def _add_incoming(root: dict, src: str, dst: str, proposal_id: int, cfg) -> None:
     """Add a planned file at its target, with any folders the run would create."""
     node, at = root, root["path"]
     parts = os.path.relpath(dst, root["path"]).split(os.sep)
@@ -100,7 +132,8 @@ def _add_incoming(root: dict, src: str, dst: str, proposal_id: int) -> None:
         node = found
     node["children"].append({"type": "file", "name": parts[-1], "path": dst, "size": None,
                              "group": "", "state": "in", "from": src, "symlink": False,
-                             "proposal_id": proposal_id})
+                             "proposal_id": proposal_id,
+                             **({"play": src} if playable(src, cfg) else {})})
 
 
 def _total(node: dict, keep: set, cfg) -> int:
@@ -110,7 +143,7 @@ def _total(node: dict, keep: set, cfg) -> int:
     for c in node["children"]:
         if c["type"] == "dir":
             remaining += _total(c, keep, cfg)
-            for key in ("in", "out"):
+            for key in ("in", "out", "trash"):
                 node[key] += c[key]
             for group in GROUPS:
                 node["counts"][group] += c["counts"][group]
@@ -119,8 +152,11 @@ def _total(node: dict, keep: set, cfg) -> int:
             remaining += group_of(c["name"], cfg) != "other"
         else:
             node["counts"][c["group"]] += 1
-            node["out"] += c["state"] == "out"
-            remaining += c["group"] != "other" and c["state"] != "out"
+            binned = c["state"] == "trash" and not c.get("trash_refused")
+            leaving = c["state"] == "out" or binned
+            node["out"] += leaving
+            node["trash"] += binned
+            remaining += c["group"] != "other" and not leaving
     node["left"] = bool(node["out"]) and not remaining and node["path"] not in keep
     return remaining
 
@@ -141,7 +177,7 @@ def build(con, cfg, hidden: bool = False) -> dict:
         node = _walk(root, root, ctx)
         for src, dst, proposal_id in moves:
             if src.startswith(root + os.sep):
-                _add_incoming(node, src, dst, proposal_id)
+                _add_incoming(node, src, dst, proposal_id, cfg)
         keep = {root} | {os.path.join(root, d) for d in (cfg.movies_dir, cfg.tv_dir, cfg.music_dir,
                                                          cfg.software_dir, cfg.adult_dir)}
         _total(node, keep, cfg)
@@ -150,4 +186,4 @@ def build(con, cfg, hidden: bool = False) -> dict:
     return {"plan_id": plan_id, "roots": trees, "missing": missing, "error": active.error,
             "stale": bool(plan and scanned and scanned > plan["created_at"]),
             "totals": {g: sum(t["counts"][g] for t in trees) for g in GROUPS},
-            "moves": sum(t["in"] for t in trees)}
+            "moves": sum(t["in"] for t in trees), "trash": sum(t["trash"] for t in trees)}

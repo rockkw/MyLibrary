@@ -245,3 +245,36 @@ tr:hover td { background: #1a1a1a; }
 .dialog.about { width: min(560px, 92vw); background: #1d1d1f; border-color: #555; color: #e8e8e8; }
 .dialog.about h2 { color: #e8e8e8; }
 .dialog.about .info { margin: 0.6rem 0 1.2rem; font-size: 0.84rem; }
+
+/* Player overlay (TASK-30) */
+.dialog.player { width: min(1100px, 94vw); max-height: 94vh; display: flex; flex-direction: column; gap: 0.5rem; padding: 1rem 1.2rem; }
+.player-head { display: flex; align-items: center; gap: 1rem; }
+.player-head h2 { flex: 1; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player-x { cursor: pointer; background: none; border: none; color: #aaa; font-size: 1.1rem; }
+.player-x:hover { color: #f90; }
+.player-meta { font-size: 0.78rem; color: #888; }
+.player-meta b { color: #ccc; font-weight: normal; }
+.dialog.player .t-banner { margin: 0; }
+#player-video { width: 100%; max-height: 70vh; background: #000; border-radius: 4px; }
+.t-play { cursor: pointer; color: #f90; }
+.t-row .t-rev { cursor: pointer; color: #777; font-size: 0.7rem; }
+.t-row .t-rev:hover { color: #f90; }
+
+/* Move to trash (TASK-31) */
+.dialog.trash { width: min(640px, 92vw); }
+.dialog.trash .side-note { margin: 0.8rem 0 1rem; line-height: 1.45; }
+.trash-file { font-family: ui-monospace, monospace; font-size: 0.8rem; color: #eee; word-break: break-all; }
+.trash-file .n { color: #777; margin-left: 0.5rem; }
+.trash-side { margin-top: 0.6rem; font-size: 0.8rem; color: #aaa; }
+.trash-side label { display: flex; gap: 0.5rem; align-items: baseline; font-family: ui-monospace, monospace; padding: 0.15rem 0; word-break: break-all; }
+.trash-side input { accent-color: #f90; }
+.trash-side .t-why { color: #e77; }
+.t-row .t-act { cursor: pointer; color: #666; font-size: 0.72rem; visibility: hidden; }
+.t-row:hover .t-act, .t-row .t-keep { visibility: visible; }
+.t-row .t-act:hover { color: #f90; }
+.t-trash .t-name { color: #e77; text-decoration: line-through; }
+.chip.t-trash-chip { color: #e77; }
+.player-nav { cursor: pointer; background: #222; color: #f90; border: 1px solid #444; border-radius: 4px; padding: 0.2rem 0.6rem; font-size: 0.9rem; }
+.player-nav:hover:not(:disabled) { border-color: #f90; }
+.player-nav:disabled { color: #555; cursor: default; }
+.player-pos { font-size: 0.75rem; color: #777; white-space: nowrap; }

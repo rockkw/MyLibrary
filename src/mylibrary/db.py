@@ -90,6 +90,18 @@ CREATE TABLE IF NOT EXISTS runs (
     snapshot_dirs TEXT           -- JSON list
 );
 
+CREATE TABLE IF NOT EXISTS trash (   -- TASK-31: files marked to move to trash
+    id          INTEGER PRIMARY KEY,
+    path        TEXT UNIQUE NOT NULL,
+    root        TEXT NOT NULL,
+    inode       INTEGER,          -- identity when marked; a changed file is refused
+    size        INTEGER,
+    mtime       REAL,
+    marked_at   TEXT,
+    status      TEXT DEFAULT 'marked',  -- marked | moved | restored
+    run_id      INTEGER,
+    dst         TEXT
+);
 CREATE TABLE IF NOT EXISTS moves (
     id          INTEGER PRIMARY KEY,
     run_id      INTEGER REFERENCES runs(id),
@@ -125,7 +137,7 @@ def connect(db_file: Path) -> sqlite3.Connection:
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("PRAGMA foreign_keys=ON")
     con.executescript(SCHEMA)
-    for table, cols in (("files", (("tags", "TEXT"),)),
+    for table, cols in (("files", (("tags", "TEXT"),)), ("moves", (("trash", "INTEGER DEFAULT 0"),)),
                         ("parses", (("edition", "TEXT"), ("season", "INTEGER"),
                                     ("episode", "INTEGER"), ("episode_last", "INTEGER"),
                                     ("episode_title", "TEXT"), ("artist", "TEXT"),

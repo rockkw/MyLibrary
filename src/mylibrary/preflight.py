@@ -1,13 +1,14 @@
 """Work out what an apply would do, changing nothing.
 
 apply uses this before it moves anything, and the file tree uses it to preview a run, so
-the two cannot disagree. The web UI may reach this module, so it must stay read-only and
+the two cannot disagree. Files marked for trash (TASK-31) are listed under "trash" and
+held out of the plan's moves, so a file never both moves and goes to trash. The web UI may reach this module, so it must stay read-only and
 must never import apply or safefs.
 """
 
 import os
 
-from . import downloads
+from . import downloads, trash
 
 
 def _nearest_existing(path: str) -> str:
@@ -46,6 +47,8 @@ def prepare(con, cfg, plan_id, active=None) -> dict:
     ok, refused, targets = [], [], set()
     roots = {str(r) for r in cfg.roots}
     active = active or downloads.check(cfg)
+    binned = trash.prepare(con, cfg, active)
+    marked = {m["path"] for m in binned["ready"] + binned["refused"]}
     for it in items:
         src, dst = it["src"], it["dst"]
         why = None
@@ -55,6 +58,8 @@ def prepare(con, cfg, plan_id, active=None) -> dict:
             st, why = None, "source missing (run scan)"
         if it["root"] not in roots:
             why = "root is not in the config"
+        elif src in marked:
+            why = "marked for trash"
         elif active.error:
             why = active.error
         elif src in active.paths:
@@ -72,6 +77,8 @@ def prepare(con, cfg, plan_id, active=None) -> dict:
         sidecars = []
         if not why:
             for s_src, s_dst in _sidecars(src, dst, cfg.sidecar_ext):
+                if s_src in marked:  # it goes to trash instead
+                    continue
                 if os.path.lexists(s_dst) or s_dst in targets:
                     why = f"sidecar target exists: {os.path.basename(s_dst)}"
                     break
@@ -86,4 +93,5 @@ def prepare(con, cfg, plan_id, active=None) -> dict:
                    "sidecars": sidecars})
     return {"plan_id": plan_id, "moves": ok, "refused": refused,
             "count": len(ok), "sidecar_count": sum(len(m["sidecars"]) for m in ok),
+            "trash": binned,
             "bytes_moved_on_disk": 0}

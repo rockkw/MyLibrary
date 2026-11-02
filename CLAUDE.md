@@ -19,14 +19,20 @@ overwrite a file.**
   writes decisions to SQLite and launches whitelisted `mylib` CLI jobs.
 - LLM output is a suggestion only (JSON, no tools). Confidence capped at 0.85 so
   LLM-only answers always need human review unless the offline IMDb check confirms.
-- `preflight.py`, `tree.py` and `analyze.py` are read-only and reachable from the web UI, so they must never
-  import `apply` or `safefs`. `preflight.prepare` is the one check for what a run would do.
+- `preflight.py`, `tree.py`, `analyze.py` and `player.py` are read-only and reachable from the web UI, so they
+  must never import `apply` or `safefs`. `preflight.prepare` is the one check for what a run would do.
+- The tree's player (`/api/play`, TASK-30) streams only through `player.resolve`: a video file in a configured
+  root, no symlink anywhere on the path, nothing in `.mylibrary-safety`, no disc images. GET only.
 - Taking a root out of `roots` keeps its rows, so decisions and history survive. Plans, the
   LLM step and counts filter with `cfg.root_filter()`, and `preflight.prepare` refuses that root.
 - Duplicates and empty or leftover folders: report only. `mylib leftovers` suggests. Approving
   one moves it aside with `safe_move` into `.mylibrary-safety/run-N/leftovers/`, and undo
   restores it. Never delete it. No Python file may contain the removal command. Snapshot folders
   (`<root>/.mylibrary-safety/run-N/`) are removed by the user, never by code.
+- Move to trash (TASK-31): the UI and `mylib trash` only record marks in the `trash` table
+  (`trash.py`, read-only, with the file's inode/size/mtime). The next `apply --execute` moves ready
+  marks with `safe_move` into `.mylibrary-safety/run-N/trash/`, and undo restores them. A marked file
+  is held out of the plan; a changed, downloading or torrent-held file is refused. Never delete.
 - Every video with an allowed extension is organized, short ones included: they go to review.
   Only `ignore_words` matches (samples, trailers) are ignored by kind.
 - Episodes skip the LLM and IMDb check. Without one season and one episode number they
@@ -57,7 +63,7 @@ overwrite a file.**
 
 ## Layout
 ```
-src/mylibrary/   config db scan parse classify imdb plan review preflight apply safefs dupes tree analyze cli
+src/mylibrary/   config db scan parse classify imdb plan review preflight apply safefs dupes tree analyze player trash cli
 src/mylibrary/web/  Flask UI (MyMagnet look: #111 bg, #f90 amber, three panes)
 tests/           pytest
 infra/compose/   systemd user units (web service, nightly pipeline timer: no renames)
@@ -76,6 +82,7 @@ mylib edit ID --title PRODUCT --kind software
 mylib edit ID --site S --date YYYY-MM-DD --performers "A, B" [--title T]
 mylib edit ID ID ... --kind scene --site S   # shared fields; empty ones keep each file's own
 mylib apply           # dry run; --execute to rename (then auto-verify)
+mylib trash PATH...   # mark for trash; the next apply --execute moves them; trash [--clear PATH...]
 mylib runs | verify --run N | undo --run N [--execute] | dupes | status
 mylib serve           # UI on http://127.0.0.1:5051
 ```

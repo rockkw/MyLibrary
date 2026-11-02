@@ -37,6 +37,7 @@ async function loadSummary() {
     `<span>plan <b>${s.plan_id ? '#' + s.plan_id : '—'}</b></span>
      <span>files <b>${s.files}</b></span>
      <span>to apply <b>${(c.auto || 0) + (c.approved || 0)}</b></span>
+     ${s.trash ? `<span>to trash <b>${s.trash}</b></span>` : ''}
      <span>LLM <b>${esc(s.ollama_model || 'off')}</b></span>`;
 }
 
@@ -376,12 +377,13 @@ async function loadDupes() {
   $('#dupes').innerHTML = (ex || sm) ? ex + sm : '<p class="empty">No duplicates found.</p>';
 }
 
-// ── tree ── Read only: clicking a file only jumps to its Review entry.
+// ── tree ── Read only: clicking a video plays it in an overlay (TASK-30); other files and
+// the ↗ review link jump to the file's Review entry.
 const TREE_MARKS = {in: ['moving in', 'in'], out: ['moving out', 'out'], decide: ['needs a decision', 'decide'],
                     skipped: ['skipped', 'quiet'], ignored: ['ignored', 'quiet'], untracked: ['not tracked', 'quiet'],
-                    downloading: ['still downloading', 'off']};
+                    downloading: ['still downloading', 'off'], trash: ['to trash', 'trash']};
 let treeNodes = [];
-const treeChanged = n => n.type === 'dir' ? n.in + n.out > 0 : ['in', 'out'].includes(n.state);
+const treeChanged = n => n.type === 'dir' ? n.in + n.out > 0 : ['in', 'out', 'trash'].includes(n.state);
 const treeRel = p => { const r = state.tree.roots.find(x => p.startsWith(x.path + '/')); return r ? p.slice(r.path.length + 1) : p; };
 const treeFiles = n => Object.values(n.counts).reduce((a, b) => a + b, 0);
 // On Analyze the tree shows only one keyword's files, and folders count only those.
@@ -403,12 +405,16 @@ function treeRow(n, open) {
   }
   const mark = TREE_MARKS[n.state];
   const detail = n.to || n.from || n.reason || '';
-  return `<div class="t-row t-file ${mark ? 't-' + mark[1] : ''} ${n.proposal_id ? 't-link' : ''}" data-n="${i}" title="${esc(detail)}">
-    <span class="t-name">${esc(n.name)}</span>
+  const tip = n.play ? 'Play' + (detail ? ' · ' + detail : '') : detail;
+  return `<div class="t-row t-file ${mark ? 't-' + mark[1] : ''} ${n.play || n.proposal_id ? 't-link' : ''}" data-n="${i}" title="${esc(tip)}">
+    ${n.play ? '<span class="t-play" aria-hidden="true">▶</span>' : ''}<span class="t-name">${esc(n.name)}</span>
     ${n.size != null ? `<span class="n">${fmtSize(n.size)}</span>` : ''}
-    ${mark ? `<span class="chip">${mark[0]}</span>` : ''}
+    ${mark ? `<span class="chip ${n.state === 'trash' ? 't-trash-chip' : ''}">${mark[0]}</span>` : ''}
     ${n.torrent ? `<span class="chip t-off">in torrent</span>` : ''}
     ${n.symlink ? '<span class="chip">link</span>' : ''}
+    ${n.play && n.proposal_id ? '<span class="t-rev" title="Open in Review">review ↗</span>' : ''}
+    ${n.state === 'trash' ? '<span class="t-act t-keep" title="Take the trash mark off">keep</span>'
+      : canTrash(n) ? '<span class="t-act t-bin" title="Move to trash">🗑</span>' : ''}
     ${detail ? `<span class="t-why">${esc(n.to ? '→ ' + treeRel(n.to) : n.from ? '← ' + treeRel(n.from) : detail)}</span>` : ''}</div>`;
 }
 const treeAllOpen = () => !!treeFilter || (state.treeOpen ?? $('#tree-changes').checked);
@@ -424,7 +430,8 @@ async function loadTree() {
   $('#tree-head').innerHTML = `
     <div class="t-totals"><span>Video files <b>${t.video}</b></span><span>Music <b>${t.music}</b></span>
       <span>Software <b>${t.software}</b></span><span>Other <b>${t.other}</b></span>
-      <span>${d.plan_id ? `Plan #${d.plan_id} moves <b>${d.moves}</b>` : 'No plan yet'}</span></div>
+      <span>${d.plan_id ? `Plan #${d.plan_id} moves <b>${d.moves}</b>` : 'No plan yet'}</span>
+      <span id="tree-trash-total" ${d.trash ? '' : 'hidden'}>To trash <b>${d.trash}</b></span></div>
     ${d.stale ? '<p class="t-banner">A scan is newer than this plan, so these changes are out of date. Run the pipeline to rebuild it.</p>' : ''}
     ${d.error ? `<p class="t-banner">${esc(d.error)}: nothing would move.</p>` : ''}
     ${d.missing.map(r => `<p class="t-banner">${esc(r)} is not mounted.</p>`).join('')}`;
@@ -448,15 +455,219 @@ function treeClick(e, filter) {
     return;
   }
   const n = treeNodes[+row.dataset.n];
-  if (!n.proposal_id) return;
+  if (e.target.closest('.t-bin')) return openTrash(n);
+  if (e.target.closest('.t-keep')) return keepFile(n);
+  if (n.play && !e.target.closest('.t-rev')) return openPlayer(n);
+  if (n.proposal_id) openInReview(n);
+}
+function openInReview(n) {
   state.status = ''; state.root = ''; state.q = base(n.from || n.path); $('#q').value = state.q;
   location.hash = '#review'; refresh();
 }
+
+// ── player ── Streams one file from /api/play; the server checks the path again.
+const video = $('#player-video');
+const playerOpen = () => $('#player-overlay').classList.contains('open');
+const fmtTime = s => s ? `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '';
+function playerWarn(lines) {
+  $('#player-warn').hidden = !lines.length;
+  $('#player-warn').innerHTML = lines.map(esc).join('<br>');
+}
+// Previous / next follow the tree's order (folders first, then names), through collapsed
+// folders too, and respect Only changes and the Analyze keyword filter. Moving-in rows are
+// left out: they play the same file as their source row.
+function playlist() {
+  const only = $('#tree-changes').checked && !treeFilter, out = [];
+  const visit = n => n.children.forEach(c => {
+    if (!treeShown(c) || (only && !treeChanged(c))) return;
+    if (c.type === 'dir') visit(c); else if (c.play && c.state !== 'in') out.push(c);
+  });
+  (state.tree?.roots || []).forEach(r => treeShown(r) && visit(r));
+  return out;
+}
+function playerNeighbours(n) {
+  const list = playlist();
+  let i = list.indexOf(n);
+  if (i < 0) i = list.findIndex(c => c.play === n.play);
+  return {list, i, prev: i > 0 ? list[i - 1] : null, next: i >= 0 && i < list.length - 1 ? list[i + 1] : null};
+}
+function playerNav(n) {
+  const {list, i, prev, next} = playerNeighbours(n);
+  $('#player-prev').disabled = !prev; $('#player-next').disabled = !next;
+  $('#player-prev').title = prev ? `Previous (P): ${prev.name}` : 'No previous video';
+  $('#player-next').title = next ? `Next (N): ${next.name}` : 'No next video';
+  $('#player-pos').textContent = i >= 0 ? `${i + 1} / ${list.length}` : '';
+}
+function playerStep(dir) {
+  if (!state.playing) return;
+  const nb = playerNeighbours(state.playing), to = dir < 0 ? nb.prev : nb.next;
+  if (to) openPlayer(to);
+}
+$('#player-prev').onclick = () => playerStep(-1);
+$('#player-next').onclick = () => playerStep(1);
+async function openPlayer(n) {
+  state.playing = n;
+  playerNav(n);
+  $('#player-title').textContent = base(n.play);
+  $('#player-meta').textContent = 'Loading…';
+  $('#player-review').hidden = !n.proposal_id;
+  playerTrashButton(n);
+  playerWarn([]);
+  if (!playerOpen()) { $('#player-overlay').classList.add('open'); $('#player-close').focus(); }
+  try {
+    const d = state.playInfo = await api('/api/play/info?path=' + encodeURIComponent(n.play));
+    if (state.playing !== n) return;
+    $('#player-meta').innerHTML = [
+      `<b>${fmtSize(d.size)}</b>`, `.${esc(d.ext)}`,
+      d.vcodec && `video <b>${esc(d.vcodec)}</b>`, d.acodec && `audio <b>${esc(d.acodec)}</b>`,
+      d.width && `<b>${d.width}×${d.height}</b>`, d.duration && `<b>${fmtTime(d.duration)}</b>`,
+      n.state === 'in' ? `planned as ${esc(treeRel(n.path))}` : '',
+    ].filter(Boolean).join(' · ');
+    $('#player-review').hidden = !(n.proposal_id || d.proposal_id);
+    playerWarn(d.warnings);
+    video.src = '/api/play?path=' + encodeURIComponent(n.play);
+    video.play().catch(() => {});  // autoplay may be blocked; the controls still work
+  } catch (e) {
+    $('#player-meta').textContent = '';
+    playerWarn([`Cannot play this file: ${e.message}`]);
+  }
+}
+function closePlayer() {
+  if (!playerOpen()) return;
+  video.pause();
+  video.removeAttribute('src'); video.load();  // stops the download, not just the picture
+  $('#player-overlay').classList.remove('open');
+  state.playing = null;
+}
+video.onerror = () => {
+  if (!video.getAttribute('src')) return;
+  const d = state.playInfo || {};
+  playerWarn([`This browser cannot play this file (.${d.ext || '?'}${d.vcodec ? ', ' + d.vcodec : ''}${d.acodec ? ' / ' + d.acodec : ''}).`,
+              ...(d.warnings || []), 'Play it in Jellyfin or VLC instead.']);
+};
+video.onloadedmetadata = () => {
+  if (video.videoWidth) return;
+  const d = state.playInfo || {};
+  playerWarn([`No picture: this browser cannot decode the video${d.vcodec ? ' (' + d.vcodec + ')' : ''}. Only the sound may play.`,
+              ...(d.warnings || []).filter(w => !w.startsWith('The video'))]);
+};
+$('#player-close').onclick = closePlayer;
+$('#player-overlay').onclick = e => { if (e.target.id === 'player-overlay') closePlayer(); };
+$('#player-full').onclick = () => video.requestFullscreen?.().catch(() => {});
+function playerTrashButton(n) {
+  const b = $('#player-trash');
+  b.hidden = !(n.state === 'trash' || canTrash(n));
+  b.textContent = n.state === 'trash' ? '↩ Keep file (marked for trash)' : '🗑 Move to trash';
+}
+$('#player-trash').onclick = () => { const n = state.playing; if (n) n.state === 'trash' ? keepFile(n) : openTrash(n); };
+$('#player-review').onclick = () => { const n = state.playing; closePlayer(); if (n) openInReview(n); };
 $('#tree').onclick = e => treeClick(e, null);
 $('#tree-changes').onchange = () => { state.treeOpen = null; renderTree(); };
 $('#tree-toggle').onclick = () => { state.treeOpen = !treeAllOpen(); renderTree(); };
 $('#tree-hidden').onchange = loadTree;
 $('#tree-refresh').onclick = loadTree;
+
+// ── move to trash (TASK-31) ── Marks are decisions in the database; the next Apply moves the
+// files into .mylibrary-safety/run-N/trash/. Rows update in place so the tree keeps its state.
+const canTrash = n => n.type === 'file' && n.trash_ok && !['in', 'trash'].includes(n.state);
+const trashOpen = () => $('#trash-overlay').classList.contains('open');
+function treeRowsFor(path) {  // every rendered row for this file, and its shared node
+  return treeNodes.map((n, i) => [n, i]).filter(([n]) => n.type === 'file' && n.path === path && n.state !== 'in');
+}
+function rerenderRows(path) {
+  for (const [n, i] of treeNodes.map((n, i) => [n, i]).filter(([n]) => n.type === 'file' && n.path === path)) {
+    const el = $(`#tree .t-file[data-n="${i}"], #az-tree .t-file[data-n="${i}"]`);
+    if (el) el.outerHTML = treeRow(n);
+  }
+}
+function setTrashTotal(delta) {
+  if (!state.tree) return;
+  state.tree.trash = Math.max(0, (state.tree.trash || 0) + delta);
+  const el = $('#tree-trash-total');
+  if (el) { el.hidden = !state.tree.trash; $('b', el).textContent = state.tree.trash; }
+}
+// After a mark changes, the plan around it can change too (a held-back video keeps its
+// subtitles). Fetch the tree again and update file rows in place, so open folders stay open.
+async function refreshTreeMarks() {
+  loadSummary().catch(() => {});
+  if (!state.tree) return;
+  try {
+    const d = await api('/api/tree' + ($('#tree-hidden').checked ? '?hidden=1' : ''));
+    const fresh = new Map();
+    const walk = n => n.children.forEach(c => c.type === 'dir' ? walk(c) : fresh.set(c.path + '|' + (c.state === 'in'), c));
+    d.roots.forEach(walk);
+    const seen = new Set();
+    treeNodes.forEach(n => {
+      if (n.type !== 'file' || seen.has(n)) return;
+      seen.add(n);
+      const f = fresh.get(n.path + '|' + (n.state === 'in'));
+      if (!f) return;
+      for (const k of ['state', 'reason', 'to', 'from', 'was', 'trash_refused', 'trash_ok', 'proposal_id', 'play']) n[k] = f[k];
+    });
+    [...new Set(treeNodes.filter(n => n.type === 'file').map(n => n.path))].forEach(rerenderRows);
+    state.tree.trash = d.trash; setTrashTotal(0);
+  } catch (e) { /* the rows already show the change; a refresh fixes the rest */ }
+}
+async function openTrash(n) {
+  state.trashFor = n;
+  $('#trash-body').innerHTML = '<p class="side-note">Checking…</p>';
+  $('#trash-ok').disabled = true;
+  $('#trash-overlay').classList.add('open');
+  $('#trash-cancel').focus();
+  try {
+    const d = await api('/api/trash/preview?path=' + encodeURIComponent(n.path));
+    if (state.trashFor !== n) return;
+    if (d.error) { $('#trash-body').innerHTML = `<p class="t-banner">Cannot move this file to trash: ${esc(d.error)}</p>`; return; }
+    $('#trash-body').innerHTML = `<div class="trash-file">${esc(d.name)}<span class="n">${fmtSize(d.size)}</span></div>
+      <div class="side-note">${esc(treeRel(d.path))}</div>
+      ${d.sidecars.length ? `<div class="trash-side">Files that belong with it:
+        ${d.sidecars.map(sc => `<label><input type="checkbox" data-p="${esc(sc.path)}" ${sc.error ? 'disabled' : 'checked'}>
+          ${esc(sc.name)} <span class="n">${sc.size != null ? fmtSize(sc.size) : ''}</span>
+          ${sc.error ? `<span class="t-why">${esc(sc.error)}</span>` : ''}</label>`).join('')}</div>` : ''}`;
+    $('#trash-ok').disabled = false;
+    $('#trash-ok').focus();
+  } catch (e) { $('#trash-body').innerHTML = `<p class="t-banner">${esc(e.message)}</p>`; }
+}
+function closeTrash() { $('#trash-overlay').classList.remove('open'); state.trashFor = null; }
+$('#trash-cancel').onclick = closeTrash;
+$('#trash-overlay').onclick = e => { if (e.target.id === 'trash-overlay') closeTrash(); };
+$('#trash-ok').onclick = async () => {
+  const n = state.trashFor;
+  if (!n) return;
+  const paths = [n.path, ...$$('#trash-body .trash-side input:checked').map(i => i.dataset.p)];
+  $('#trash-ok').disabled = true;
+  try {
+    const r = await api('/api/trash', {paths});
+    for (const p of r.marked) {
+      for (const [node] of treeRowsFor(p)) {
+        if (node.state === 'trash') continue;
+        node.was = {state: node.state, reason: node.reason};
+        Object.assign(node, {state: 'trash', reason: 'moves to trash on next Apply', trash_refused: false});
+      }
+      rerenderRows(p);
+    }
+    setTrashTotal(r.marked.length);
+    closeTrash();
+    refreshTreeMarks();
+    if (state.playing) playerTrashButton(state.playing);
+    note(r.refused.length ? `Marked ${r.marked.length}; refused: ${r.refused.map(x => base(x.path) + ' (' + x.reason + ')').join(', ')}`
+                          : `Marked ${r.marked.length} for trash. Apply moves them. ${r.cli}`, !!r.refused.length);
+  } catch (e) { note(e.message, true); $('#trash-ok').disabled = false; }
+};
+async function keepFile(n) {
+  try {
+    const r = await api('/api/trash/clear', {paths: [n.path]});
+    for (const [node] of treeRowsFor(n.path)) {
+      const was = node.was || {};
+      Object.assign(node, {state: was.state || '', reason: was.reason || null, trash_refused: false});
+    }
+    rerenderRows(n.path);
+    setTrashTotal(-r.cleared);
+    refreshTreeMarks();
+    if (state.playing) playerTrashButton(state.playing);
+    note(`Kept ${base(n.path)}. ${r.cli}`);
+  } catch (e) { note(e.message, true); }
+}
 
 // ── analyze ── Read only: a keyword shows its files in a tree under the heatmap.
 const azBars = items => {
@@ -527,6 +738,7 @@ $('#analyze-wrap').onclick = e => {
 
 // ── nav + events ──
 function showPage(p) {
+  closeTrash(); closePlayer();
   $$('.page').forEach(el => el.classList.toggle('active', el.id === 'page-' + p));
   $$('.nav-link').forEach(el => el.classList.toggle('active', el.dataset.page === p));
   if (p === 'tree') loadTree();
@@ -555,6 +767,16 @@ $$('.job-btn').forEach(b => b.onclick = () => startJob(b.dataset.job));
 $('#job-toggle').onclick = () => $('#jobbar').classList.toggle('open');
 
 document.addEventListener('keydown', e => {
+  if (trashOpen()) {  // the confirmation sits above the player and the tree
+    if (e.key === 'Escape') closeTrash();
+    return;
+  }
+  if (playerOpen()) {  // the video keeps its own keys; no Review shortcuts behind the player
+    if (e.key === 'Escape' && !document.fullscreenElement) closePlayer();
+    else if ((e.key === 'n' || e.key === 'N') && !e.ctrlKey && !e.metaKey) playerStep(1);
+    else if ((e.key === 'p' || e.key === 'P') && !e.ctrlKey && !e.metaKey) playerStep(-1);
+    return;
+  }
   if (menuOpen() || $('#about-overlay').classList.contains('open')) {  // no Review shortcuts here
     if (e.key === 'Escape') { $('#about-overlay').classList.contains('open') ? closeAbout() : (toggleConfig(false), $('#config-btn').focus()); }
     return;

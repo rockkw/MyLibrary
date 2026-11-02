@@ -11,15 +11,17 @@ It deliberately does not import mylibrary.apply or mylibrary.safefs
 """
 
 import os
+import shlex
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
 
-from flask import Flask, abort, jsonify, render_template, request
+from flask import Flask, abort, jsonify, render_template, request, send_file
 
-from mylibrary import analyze, config, db, dupes, leftovers, plan, review, tree, version
+from mylibrary import (analyze, config, db, dupes, leftovers, plan, player, review, trash, tree,
+                       version)
 
 SRC = Path(__file__).resolve().parents[2]          # .../src
 app = Flask(__name__)
@@ -211,6 +213,62 @@ def api_analyze():
 @app.get("/api/tree")
 def api_tree():
     return jsonify(tree.build(con(), CFG, hidden=request.args.get("hidden") == "1"))
+
+
+def _paths(body):
+    paths = body.get("paths")
+    if not (isinstance(paths, list) and paths and all(isinstance(p, str) for p in paths)):
+        abort(400, "paths must be a list of file paths")
+    return paths
+
+
+@app.get("/api/trash")
+def api_trash_list():
+    return jsonify(trash.listing(con()))
+
+
+@app.get("/api/trash/preview")
+def api_trash_preview():
+    return jsonify(trash.preview(con(), CFG, request.args.get("path", "")))
+
+
+@app.post("/api/trash")
+def api_trash_mark():
+    """Record a decision only; the next apply moves the files. Nothing changes on disk here."""
+    paths = _paths(request.get_json(force=True))
+    res = trash.mark(con(), CFG, paths)
+    res["cli"] = "mylib trash " + " ".join(shlex.quote(p) for p in paths)
+    return jsonify(res)
+
+
+@app.post("/api/trash/clear")
+def api_trash_clear():
+    paths = _paths(request.get_json(force=True))
+    res = trash.clear(con(), paths)
+    res["cli"] = "mylib trash --clear " + " ".join(shlex.quote(p) for p in paths)
+    return jsonify(res)
+
+
+@app.get("/api/play/info")
+def api_play_info():
+    try:
+        return jsonify(player.info(con(), CFG, request.args.get("path", "")))
+    except player.Refused as e:
+        abort(403, str(e))
+
+
+@app.get("/api/play")
+def api_play():
+    """Stream one video for the in-page player. Read only; Range requests allow seeking."""
+    try:
+        real = player.resolve(CFG, request.args.get("path", ""))
+    except player.Refused as e:
+        abort(403, str(e))
+    resp = send_file(real, mimetype=player.mimetype(real), conditional=True, etag=True,
+                     max_age=0, download_name=os.path.basename(real))
+    resp.headers["Content-Disposition"] = "inline"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    return resp
 
 
 @app.get("/api/leftovers")

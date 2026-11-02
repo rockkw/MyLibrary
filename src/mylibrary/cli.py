@@ -18,6 +18,8 @@
   mylib runs | status | dupes
   mylib leftovers [--print0]      folders moves left behind; report only
   mylib leftovers --clean PATH    dry run; add --execute to move it aside (never deleted)
+  mylib trash PATH...             mark files; the next apply --execute moves them to trash
+  mylib trash [--clear PATH...]   list marks, or take them off (nothing is ever deleted)
   mylib imdb-import FILE          optional offline IMDb title data
   mylib serve                     start the review UI (default http://127.0.0.1:5051)
 
@@ -26,10 +28,11 @@ Add --json to any command for machine-readable output (logs go to stderr).
 
 import argparse
 import json
+import os
 import sys
 
 from . import version, apply as applymod, classify, config, db, downloads, dupes, imdb
-from . import leftovers, parse, plan, review, scan
+from . import leftovers, parse, plan, review, scan, trash
 
 
 def main(argv=None):
@@ -73,6 +76,9 @@ def main(argv=None):
     p.add_argument("--print0", action="store_true", help="NUL-separated paths, for xargs -0")
     p.add_argument("--clean", action="append", metavar="PATH", help="folder to move aside")
     p.add_argument("--execute", action="store_true", help="actually move --clean folders")
+    p = sub.add_parser("trash", help="mark files to move to trash on the next apply")
+    p.add_argument("paths", nargs="*", metavar="PATH", help="files to mark; none lists the marks")
+    p.add_argument("--clear", action="store_true", help="take the mark off these files")
     p = sub.add_parser("imdb-import"); p.add_argument("file")
     sub.add_parser("serve")
 
@@ -80,7 +86,6 @@ def main(argv=None):
     cfg = config.load(a.config)
     if a.cmd == "serve":
         if a.config:
-            import os
             os.environ["MYLIBRARY_CONFIG"] = a.config
         from .web.app import serve
         return serve()
@@ -88,6 +93,7 @@ def main(argv=None):
     log = lambda msg="": print(msg, file=out, flush=True)
     con = db.connect(cfg.db_file)
     plan_id = getattr(a, "plan", None) or plan.current_plan(con)
+    rc = 0
 
     def need_plan():
         if not plan_id:
@@ -198,11 +204,27 @@ def main(argv=None):
                     log(f"      remove from the client first: {i['torrent']}")
                 for f in i["files"]:
                     log(f"      {f['name']}  ({f['size'] / 1e3:.0f} KB)")
+    elif a.cmd == "trash" and a.clear:
+        res = trash.clear(con, [os.path.abspath(p) for p in a.paths])
+        log(f"{res['cleared']} marks cleared")
+    elif a.cmd == "trash" and a.paths:
+        res = trash.mark(con, cfg, [os.path.abspath(p) for p in a.paths])
+        for r in res["refused"]:
+            log(f"  refused: {r['path']}: {r['reason']}")
+        log(f"{len(res['marked'])} files marked. Nothing has moved: `mylib apply --execute` moves "
+            "them into .mylibrary-safety/run-N/trash/, and space comes back only when you remove "
+            "that folder yourself.")
+        rc = 1 if res["refused"] else 0
+    elif a.cmd == "trash":
+        res = trash.listing(con)
+        for r in res:
+            log(f"  {r['path']}  ({(r['size'] or 0) / 1e6:.1f} MB, marked {r['marked_at']})")
+        log(f"{len(res)} files marked for trash")
     elif a.cmd == "imdb-import":
         res = {"rows": imdb.import_basics(con, a.file, log=log)}
     if a.json:
         print(json.dumps(res, default=str, ensure_ascii=False))
-    return 0
+    return rc
 
 
 if __name__ == "__main__":

@@ -254,4 +254,5 @@ def summary(con, cfg, plan_id):
         f"SELECT f.root, COUNT(*) n FROM files f WHERE f.missing=0 AND {in_roots} GROUP BY f.root",
         names)]
     out["files"] = sum(r["n"] for r in out["roots"])
+    out["trash"] = con.execute("SELECT COUNT(*) FROM trash WHERE status='marked'").fetchone()[0]
     return out

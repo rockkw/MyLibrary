@@ -116,6 +116,42 @@
   </div>
 </div>
 
+<!-- ── Player (TASK-30): read only, streams one video over the tree ── -->
+<div id="player-overlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="player-title">
+  <div class="dialog player">
+    <div class="player-head">
+      <button class="player-nav" id="player-prev" title="Previous video (P)" aria-label="Previous video">◀</button>
+      <h2 id="player-title"></h2>
+      <span id="player-pos" class="player-pos"></span>
+      <button class="player-nav" id="player-next" title="Next video (N)" aria-label="Next video">▶</button>
+      <button class="player-x" id="player-close" title="Close (Esc)" aria-label="Close">✕</button>
+    </div>
+    <div id="player-meta" class="player-meta"></div>
+    <div id="player-warn" class="t-banner" hidden></div>
+    <video id="player-video" controls preload="metadata" playsinline></video>
+    <div class="btns">
+      <button class="cancel" id="player-trash" hidden>🗑 Move to trash</button>
+      <button class="cancel" id="player-review" hidden>Open in Review</button>
+      <button class="cancel" id="player-full">Full screen</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Move to trash (TASK-31): records a decision only; the next Apply moves the files ── -->
+<div id="trash-overlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="trash-title">
+  <div class="dialog trash">
+    <h2 id="trash-title">🗑 Move to trash</h2>
+    <div id="trash-body"></div>
+    <p class="side-note">Nothing moves now. The next <b>Apply</b> moves these into
+      <code>.mylibrary-safety/run-N/trash/</code> in their root, and <b>Undo</b> on that run puts them back.
+      Nothing is deleted, so disk space comes back only when you remove that trash folder yourself.</p>
+    <div class="btns">
+      <button class="cancel" id="trash-cancel">Cancel</button>
+      <button class="confirm" id="trash-ok">Mark for trash</button>
+    </div>
+  </div>
+</div>
+
 <div id="apply-overlay" class="overlay">
   <div class="dialog">
     <h2>Apply plan <span id="apply-plan"></span></h2>
