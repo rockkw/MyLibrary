@@ -154,8 +154,9 @@ def identify(path: str, duration: float | None, cfg) -> dict:
 
     if is_sample:
         kind, reasons = "sample", reasons + ["matches ignore word"]
+    # Short videos are organized too, but a person checks each one is what its name says.
     if duration and duration < cfg.min_duration_min * 60 and kind == "movie":
-        kind, conf = "extra", conf - 0.3
+        conf -= 0.3
         reasons.append(f"short ({duration/60:.0f} min)")
     if not year:
         conf -= 0.35
@@ -335,6 +336,9 @@ SCENE_BRACKET = re.compile(rf"^\[([^\]]+)\]\s*(.+?)\s*{SCENE_DATE}", re.I)
 SCENE_DASHED = re.compile(rf"^(\S+) - (.+?)\s*{SCENE_DATE}", re.I)
 SCENE_PLACED = re.compile(r"^(.+?) - (\d{4}-\d{2}-\d{2})(?: - (.+?))??(?: - (.+?))?(?: - \d{3,4}p)?$")
 STAGE_NAME = re.compile(r"\d|[a-z][A-Z]")
+# "[181228][Brand] Title": a common Japanese release name, date first as YYMMDD or YYYYMMDD.
+SCENE_RELEASE = re.compile(r"^\[(\d{6}|\d{8})\]\s*\[([^\]]+)\]\s*(.+)$")
+RELEASE_TAG = re.compile(r"\s*[(\[][\x20-\x7e]*[)\]]\s*$")  # an ASCII tag such as (No Watermark)
 
 
 def _real_date(y: int, m: int, d: int) -> str | None:
@@ -394,6 +398,16 @@ def scene_from_name(name: str) -> dict | None:
         people, title = _people_and_title([w for w in m[6].split(".") if w])
         return {"site": m[1], "scene_date": when, "performers": people, "title": title,
                 "year": int(when[:4]) if when else int(m[5]) if m[5] else None, "marked": True}
+    m = SCENE_RELEASE.match(name)
+    if m:
+        d = m[1]
+        when = (_real_date(int(d[:4]), int(d[4:6]), int(d[6:])) if len(d) == 8
+                else _real_date(2000 + int(d[:2]), int(d[2:4]), int(d[4:])))
+        title = m[3].strip()
+        while (shorter := RELEASE_TAG.sub("", title).strip()) and shorter != title:
+            title = shorter
+        return {"site": m[2].strip(), "scene_date": when, "performers": None, "title": title or None,
+                "year": int(when[:4]) if when else None, "marked": False}
     m = SCENE_BRACKET.match(name) or SCENE_DASHED.match(name)
     if m:
         when = _bracket_date(m[3], m[4], m[5])

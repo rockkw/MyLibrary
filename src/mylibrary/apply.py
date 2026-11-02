@@ -25,13 +25,14 @@ from .scan import SAFETY_DIR, count_files
 
 @contextlib.contextmanager
 def _lock(cfg):
+    """One apply, undo, cleanup or pipeline at a time, so nothing scans files mid-move."""
     path = str(cfg.db_file) + ".lock"
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "a") as fh:
         try:
             fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise RuntimeError("another apply/undo is already running")
+            raise RuntimeError("another apply, undo or pipeline is already running")
         yield
 
 

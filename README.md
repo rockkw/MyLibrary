@@ -45,10 +45,12 @@ a tree under the heatmap, and click it again or press Clear to close it. It also
 
 **Adult scenes** are recognised from names like `Site.26.06.21.Performer.Title.XXX`, whether the
 file or its release folder carries it, or `[Site] Performer Title (26.10.16)` and
-`Site - Performer - Title (17.05.2026)`, and planned into
+`Site - Performer - Title (17.05.2026)` or `[181228][Brand] Title`, and planned into
 `Adult/Site/Site - 2026-06-21 - Performer - Title - 1080p.ext`. Only names with an `XXX` marker and
 a full date can be auto. Scenes skip the LLM, the IMDb check and the short-film rule. A scene
-already moved elsewhere is read from its original name, and gets a proposal to move here.
+already moved elsewhere is read from its original name, and gets a proposal to move here. For a
+name none of these rules can read, the LLM may suggest a scene with its site, date, performers and
+title. Those always go to review with the fields filled in.
 
 **Music** is identified only from embedded tags (album artist first) and planned into
 `music_dir` using `music_layout`. Tracks skip the LLM. Missing artist, album or title
@@ -163,6 +165,29 @@ UI keys: `j`/`k` move, `a` approve, `s` skip, `e` edit, `x` select, `/` search.
 Try it on one root with a small `--root` first, and compare models on a sample
 of your messiest names (`mylib classify --model qwen2.5:14b --redo`).
 
+## Run as a service
+
+The UI and a nightly pipeline run as systemd user units:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp infra/compose/mylibrary-* ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now mylibrary-web mylibrary-pipeline.timer
+```
+
+- **Config:** the units find `config.ini` as the command line does, through `MYLIBRARY_CONFIG` or
+  the repo's own file. Add `Environment=MYLIBRARY_CONFIG=...` with
+  `systemctl --user edit mylibrary-web` to use another one.
+- **Nightly pipeline:** it runs at 03:17 and only scans, parses, classifies and plans. It never
+  applies. It skips the night if an apply or undo is running, and a run missed while the machine
+  was off runs at the next start.
+- **Restarting the UI:** use `systemctl --user restart mylibrary-web`. A job the UI started, such
+  as an apply, runs on to the end.
+- **Logs:** `journalctl --user -u mylibrary-web` and `journalctl --user -u mylibrary-pipeline`.
+- **Without a login:** user units run only while you are logged in. To start them at boot and run
+  the timer when nobody is logged in, run `loginctl enable-linger` once.
+
 ## Config
 
 See `config.ini.sample`. Values support `${VAR:-default}` like MyMagnet;
@@ -176,7 +201,7 @@ src/mylibrary/        core: config, db, scan, parse, classify, imdb, plan, revie
 src/mylibrary/cli.py  the `mylib` CLI
 src/mylibrary/web/    Flask UI (app.py, templates/, static/)
 tests/                pytest, including the no-delete guard
-infra/compose/        systemd units (UI service, nightly pipeline timer)
+infra/compose/        systemd user units (UI service, nightly pipeline timer)
 .github/workflows/    CI: runs the tests on every push
 mylib.py              run-from-repo shim
 ```

@@ -1,9 +1,14 @@
-# Nightly scan + parse + classify + plan. Never applies; renames need your review.
+# Nightly scan, parse, classify and plan, started by mylibrary-pipeline.timer.
+# It never applies: renames need your review. It skips the night if an apply or undo is running.
 [Unit]
 Description=MyLibrary pipeline (no renames)
+After=network.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=%h/src/MyLibrary
-Environment=MYLIBRARY_CONFIG=%h/src/MyLibrary/config.ini
+WorkingDirectory=%h
 ExecStart=%h/.local/bin/mylib pipeline
+Environment=PYTHONUNBUFFERED=1
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=yes

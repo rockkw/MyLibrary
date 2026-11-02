@@ -27,13 +27,16 @@ overwrite a file.**
   one moves it aside with `safe_move` into `.mylibrary-safety/run-N/leftovers/`, and undo
   restores it. Never delete it. No Python file may contain the removal command. Snapshot folders
   (`<root>/.mylibrary-safety/run-N/`) are removed by the user, never by code.
+- Every video with an allowed extension is organized, short ones included: they go to review.
+  Only `ignore_words` matches (samples, trailers) are ignored by kind.
 - Episodes skip the LLM and IMDb check. Without one season and one episode number they
   have no target and go to review; multi-episode files always go to review.
 - Music identity comes only from embedded tags and skips the LLM. Tags are untrusted input:
   they reach file paths, so every part goes through `plan.clean`.
 - `parse.group_albums` runs after every parse, so compilation and disc-folder rules need no
   `--redo`. A release is a folder; only an album artist on every track outranks detection.
-- Scenes (`kind='scene'`) skip the LLM and IMDb. `parse.find_scenes` runs after every parse, so
+- Scenes (`kind='scene'`) the parser recognises skip the LLM and IMDb. The LLM may suggest a scene
+  (site, date, performers, title) for a file the parser could not read; that always goes to review. `parse.find_scenes` runs after every parse, so
   no `--redo` is needed, and reads the first recorded move for a moved file's original name.
   Auto needs an `XXX` marker and a real date; anything else goes to review. Names are
   untrusted, so every part goes through `plan.clean`.

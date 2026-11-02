@@ -1,5 +1,7 @@
+# Runs mylibrary-pipeline.service nightly. A night missed while the machine was off runs at
+# the next start.
 [Unit]
-Description=Run MyLibrary pipeline nightly
+Description=Run the MyLibrary pipeline nightly
 
 [Timer]
 OnCalendar=*-*-* 03:17

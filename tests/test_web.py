@@ -154,3 +154,21 @@ def test_edit_rejects_bad_scene_date(client, lib):
     r = client.post("/api/edit", json={"id": pid, "title": "T", "kind": "scene", "site": "A",
                                        "scene_date": "soon"})
     assert r.status_code == 400
+
+
+def test_an_item_without_a_target_cannot_be_approved(client, lib):
+    item = client.get("/api/proposals?status=review").get_json()["items"][0]
+    r = client.post("/api/edit", json={"id": item["id"], "kind": "scene", "title": "Only A Title"}).get_json()
+    assert r["dst"] is None and r["status"] == "review" and "needs a site" in r["reason"]
+    r = client.post("/api/decision", json={"ids": [item["id"]], "action": "approve"}).get_json()
+    assert r["updated"] == 0 and r["no_target"] == 1
+    assert client.get(f"/api/proposal/{item['id']}").get_json()["status"] == "review"
+    r = client.post("/api/decision", json={"ids": [item["id"]], "action": "skip"}).get_json()
+    assert r["updated"] == 1
+
+
+def test_adding_the_site_makes_it_approved_and_applicable(client, lib):
+    item = client.get("/api/proposals?status=review").get_json()["items"][0]
+    r = client.post("/api/edit", json={"id": item["id"], "kind": "scene", "title": "Only A Title",
+                                       "site": "Some Site"}).get_json()
+    assert r["status"] == "approved" and "/Adult/Some Site/" in r["dst"]

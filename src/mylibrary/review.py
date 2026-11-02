@@ -27,11 +27,13 @@ def decide(con, proposal_ids, action: str) -> int:
         raise ValueError("action must be approve, skip or reset")
     n = 0
     for pid in proposal_ids:
-        # conflicts can be skipped but not approved until fixed
+        # Conflicts can be skipped but not approved until fixed, and an item with no target
+        # has nowhere to go, so approving it would only hide it from apply.
         allowed = DECIDABLE if new == "skipped" else ("auto", "review", "skipped", "approved")
+        target = "" if new == "skipped" else " AND dst IS NOT NULL"
         n += con.execute(
             f"UPDATE proposals SET status=?, decided_at=? WHERE id=? AND status IN "
-            f"({','.join('?' * len(allowed))})", (new, now(), pid, *allowed)).rowcount
+            f"({','.join('?' * len(allowed))}){target}", (new, now(), pid, *allowed)).rowcount
     con.commit()
     return n
 

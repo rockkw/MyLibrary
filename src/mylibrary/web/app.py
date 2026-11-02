@@ -120,8 +120,14 @@ def api_decision():
     action = body.get("action")
     if action not in ("approve", "skip", "reset"):
         abort(400)
-    n = review.decide(con(), ids, action)
-    return jsonify({"updated": n, "cli": f"mylib {action} {' '.join(map(str, ids))}"})
+    c = con()
+    n = review.decide(c, ids, action)
+    no_target = 0
+    if action == "approve" and ids:
+        no_target = c.execute(f"SELECT COUNT(*) FROM proposals WHERE dst IS NULL AND id IN "
+                              f"({','.join('?' * len(ids))})", ids).fetchone()[0]
+    return jsonify({"updated": n, "no_target": no_target,
+                    "cli": f"mylib {action} {' '.join(map(str, ids))}"})
 
 
 @app.post("/api/edit")

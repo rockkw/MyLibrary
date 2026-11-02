@@ -177,14 +177,16 @@ async function saveEdit() {
                                       site: $('#ed-site').value,
                                       scene_date: $('#ed-date').value,
                                       performers: $('#ed-performers').value});
-    note(`${r.cli} → ${r.status}`);
+    if (r.dst) note(`${r.cli} → ${r.status}`);
+    else note(`Saved, but there is no target yet: ${r.reason}. It stays in review.`, true);
     await refresh(true);
   } catch (e) { note(e.message, true); }
 }
 async function decide(ids, action) {
   if (!ids.length) return;
   const r = await api('/api/decision', {ids, action});
-  note(`${r.cli} → ${r.updated} updated`);
+  if (r.no_target) note(`${r.no_target} item(s) not approved: no target yet. Fill in the missing fields and Save.`, true);
+  else note(`${r.cli} → ${r.updated} updated`);
   state.checked.clear();
   const newStatus = {approve: 'approved', skip: 'skipped', reset: 'review'}[action];
   const staysInView = !state.status || state.status.split(',').includes(newStatus);

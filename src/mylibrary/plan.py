@@ -175,8 +175,8 @@ def make_plan(con, cfg, note="", log=print) -> dict:
             con.execute("UPDATE parses SET imdb_id=? WHERE file_id=?", (im["tconst"], r["id"]))
         if r["path"] in active.paths:
             status, notes = "ignored", notes + ["still downloading"]
-        elif r["kind"] in ("sample", "extra"):
-            status, notes = "ignored", notes + [f"kind={r['kind']}"]
+        elif r["kind"] == "sample":
+            status, notes = "ignored", notes + ["kind=sample"]
         elif not dst:
             status, notes = "review", notes + [needs(r["kind"])]
         elif dst == r["path"]:
@@ -196,6 +196,10 @@ def make_plan(con, cfg, note="", log=print) -> dict:
             status, notes = "review", notes + ["changed recently: may still be downloading"]
         elif r["kind"] == "software" and r["source"] == "llm":
             status, notes = "review", notes + ["software title suggested by the LLM"]
+        elif r["kind"] == "scene" and r["source"] == "llm":
+            status, notes = "review", notes + ["scene suggested by the LLM"]
+        elif r["kind"] == "extra":
+            status, notes = "review", notes + ["may be bonus content: check it"]
         elif conf >= cfg.auto_approve:
             status = "auto"
         else:

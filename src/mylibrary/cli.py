@@ -106,10 +106,14 @@ def main(argv=None):
     elif a.cmd == "plan":
         res = plan.make_plan(con, cfg, note=a.note, log=log)
     elif a.cmd == "pipeline":
-        res = {"scan": scan.scan(con, cfg, log=log),
-               "parse": parse.parse_all(con, cfg, log=log),
-               "classify": classify.classify_all(con, cfg, limit=a.limit, log=log),
-               "plan": plan.make_plan(con, cfg, note="pipeline", log=log)}
+        try:
+            with applymod._lock(cfg):
+                res = {"scan": scan.scan(con, cfg, log=log),
+                       "parse": parse.parse_all(con, cfg, log=log),
+                       "classify": classify.classify_all(con, cfg, limit=a.limit, log=log),
+                       "plan": plan.make_plan(con, cfg, note="pipeline", log=log)}
+        except RuntimeError as e:
+            sys.exit(f"pipeline skipped: {e}")
     elif a.cmd == "review":
         res = review.list_proposals(con, cfg, need_plan(), a.status, a.q, limit=a.limit)
         for r in res:

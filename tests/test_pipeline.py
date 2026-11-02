@@ -1563,3 +1563,171 @@ def test_adult_folder_is_never_a_leftover(lib):
     (lib["root"] / "Adult").mkdir()
     report = leftovers.find(lib["con"], lib["cfg"])
     assert not any(i["path"].endswith("/Adult") for i in report["empty"])
+
+
+def test_short_video_is_organized_after_review(lib, monkeypatch):
+    lib["cfg"].min_duration_min = 40
+    probe_with(monkeypatch, {})  # every file probes as 200 s
+    add_files(lib, "Brief.Encounter.1945.1080p.mkv")
+    run_to_plan(lib)
+    p = proposal(lib["con"], "Brief.Encounter")
+    assert p["status"] == "review" and "short (3 min)" in p["reason"]
+    assert p["dst"].endswith("/Movies/Brief Encounter (1945)/Brief Encounter (1945).mkv")
+
+
+def test_llm_bonus_content_goes_to_review_not_ignored(lib):
+    con, cfg = lib["con"], lib["cfg"]
+    add_files(lib, "Making.Of.Something.2001.mkv")
+    run_to_plan(lib)
+    con.execute("""UPDATE parses SET kind='extra', source='llm', confidence=0.8 WHERE file_id=
+                   (SELECT id FROM files WHERE path LIKE '%Making.Of%')""")
+    plan.make_plan(con, cfg, log=quiet)
+    p = proposal(con, "Making.Of")
+    assert p["status"] == "review" and "bonus content" in p["reason"] and p["dst"]
+
+
+def test_samples_and_trailers_stay_ignored(lib):
+    add_files(lib, "Heat.1995.trailer.mkv")
+    run_to_plan(lib)
+    assert proposal(lib["con"], "Heat.1995.trailer")["status"] == "ignored"
+    assert proposal(lib["con"], "Movie.Name.2019.sample")["status"] == "ignored"
+
+
+@pytest.mark.parametrize("name,site,when,title", [
+    ("[181228][Brandname] Some Long Title(No Watermark)", "Brandname", "2018-12-28", "Some Long Title"),
+    ("[20190105][魔法] テスト 題名 [1080p] (x264)", "魔法", "2019-01-05", "テスト 題名"),
+    ("[181399][Brandname] Bad Date", "Brandname", None, "Bad Date"),
+    ("[991231][Brandname] Future", "Brandname", None, "Future"),
+])
+def test_release_names_give_brand_date_and_title(name, site, when, title):
+    s = parse.scene_from_name(name)
+    assert (s["site"], s["scene_date"], s["title"], s["performers"], s["marked"]) == (
+        site, when, title, None, False)
+
+
+def test_release_name_is_planned_for_review_under_its_brand(lib):
+    add_files(lib, "[181228][Brandname] Some Long Title(No Watermark).mp4")
+    run_to_plan(lib)
+    p = proposal(lib["con"], "Brandname")
+    assert p["status"] == "review" and "no XXX marker" in p["reason"]
+    assert "/Adult/Brandname/Brandname - 2018-12-28 - Some Long Title" in p["dst"]
+
+
+def llm_says(answer, asked=None):
+    def opener(req, timeout):
+        if asked is not None:
+            asked.append(json.loads(json.loads(req.data)["messages"][1]["content"])["filename"])
+        return FakeResp(json.dumps({"message": {"content": json.dumps(answer)}}).encode())
+    return opener
+
+
+def test_llm_can_suggest_a_scene_which_always_needs_review(lib):
+    con, cfg = lib["con"], lib["cfg"]
+    cfg.ollama_enabled, cfg.llm_max_conf, cfg.auto_approve = True, 0.99, 0.5
+    run_to_plan(lib)
+    ans = {"title": "Pool Day", "year": None, "kind": "scene", "confidence": 0.99,
+           "site": "Some/Site", "scene_date": "2021-06-21", "performers": "Ann Lee, Kim Roe"}
+    classify.classify_all(con, cfg, log=quiet, opener=llm_says(ans))
+    row = con.execute("SELECT * FROM parses WHERE source='llm'").fetchone()
+    assert (row["kind"], row["site"], row["scene_date"], row["performers"], row["year"]) == (
+        "scene", "Some/Site", "2021-06-21", "Ann Lee, Kim Roe", 2021)
+    plan.make_plan(con, cfg, log=quiet)
+    p = proposal(con, "final_cut_v2")
+    assert p["status"] == "review" and "scene suggested by the LLM" in p["reason"]
+    assert p["dst"].endswith("/Adult/SomeSite/SomeSite - 2021-06-21 - Ann Lee, Kim Roe - Pool Day.mp4")
+
+
+@pytest.mark.parametrize("bad", ["2021-13-45", "20210621", "June 2021", "2999-01-01", 2021, None])
+def test_llm_scene_date_must_be_real(lib, bad):
+    con, cfg = lib["con"], lib["cfg"]
+    cfg.ollama_enabled = True
+    run_to_plan(lib)
+    ans = {"title": "T", "year": 2021, "kind": "scene", "confidence": 0.5, "site": "S",
+           "scene_date": bad, "performers": None}
+    classify.classify_all(con, cfg, log=quiet, opener=llm_says(ans))
+    row = con.execute("SELECT scene_date, year FROM parses WHERE source='llm'").fetchone()
+    assert row["scene_date"] is None and row["year"] is None
+
+
+def test_llm_scene_without_a_site_has_no_target(lib):
+    con, cfg = lib["con"], lib["cfg"]
+    cfg.ollama_enabled = True
+    run_to_plan(lib)
+    ans = {"title": "Pool Day", "year": None, "kind": "scene", "confidence": 0.7,
+           "site": None, "scene_date": None, "performers": "Ann Lee"}
+    classify.classify_all(con, cfg, log=quiet, opener=llm_says(ans))
+    plan.make_plan(con, cfg, log=quiet)
+    p = proposal(con, "final_cut_v2")
+    assert p["status"] == "review" and p["dst"] is None and "needs a site" in p["reason"]
+
+
+def test_llm_movie_answer_clears_scene_fields(lib):
+    con, cfg = lib["con"], lib["cfg"]
+    cfg.ollama_enabled = True
+    run_to_plan(lib)
+    ans = {"title": "Blade Runner", "year": 1982, "kind": "movie", "confidence": 0.8,
+           "site": "Leaked", "scene_date": "2020-01-01", "performers": "X"}
+    classify.classify_all(con, cfg, log=quiet, opener=llm_says(ans))
+    row = con.execute("SELECT * FROM parses WHERE source='llm'").fetchone()
+    assert (row["kind"], row["site"], row["scene_date"], row["performers"]) == ("movie", None, None, None)
+
+
+def test_parser_scenes_are_never_sent_to_the_llm(lib):
+    con, cfg = lib["con"], lib["cfg"]
+    cfg.ollama_enabled = True
+    add_files(lib, "[181228][Brandname] Some Long Title.mp4", f"{DOTTED}.mp4")
+    run_to_plan(lib)
+    asked = []
+    classify.classify_all(con, cfg, log=quiet, opener=llm_says(
+        {"title": "x", "year": None, "kind": "unknown", "confidence": 0.1}, asked))
+    assert asked and not [n for n in asked if "Brandname" in n or n.startswith("Acme")]
+
+
+def test_a_parser_match_replaces_an_llm_scene(lib):
+    con, cfg = lib["con"], lib["cfg"]
+    add_files(lib, "[181228][Brandname] Some Long Title.mp4")
+    run_to_plan(lib)
+    con.execute("""UPDATE parses SET kind='scene', source='llm', site='Wrong', confidence=0.85
+                   WHERE file_id=(SELECT id FROM files WHERE path LIKE '%Brandname%')""")
+    parse.parse_all(con, cfg, log=quiet)
+    row = con.execute("SELECT p.* FROM parses p JOIN files f ON f.id=p.file_id "
+                      "WHERE f.path LIKE '%Brandname%'").fetchone()
+    assert row["site"] == "Brandname" and row["source"] == "guessit"
+
+
+@pytest.mark.parametrize("word", ["null", "Null", "NONE", " n/a ", "unknown", ""])
+def test_llm_words_for_nothing_are_empty(lib, word):
+    con, cfg = lib["con"], lib["cfg"]
+    cfg.ollama_enabled = True
+    run_to_plan(lib)
+    ans = {"title": "T", "year": None, "kind": "scene", "confidence": 0.5, "site": "S",
+           "scene_date": None, "performers": word}
+    classify.classify_all(con, cfg, log=quiet, opener=llm_says(ans))
+    assert con.execute("SELECT performers FROM parses WHERE source='llm'").fetchone()[0] is None
+
+
+@pytest.mark.parametrize("stem,site,llm_title,title", [
+    ("Show Name _ First scene _ Site", "Site", "Show Name", "Show Name - First scene"),
+    ("Show Name _ Site (15)", "Site", "Show Name", "Show Name (15)"),
+    ("Show Name _ Site", "site", "Show Name Site", "Show Name"),
+    ("Show Name _ Other", "Site", "Kept", "Kept"),
+    ("No separators here", "Site", "Kept", "Kept"),
+    ("Show Name _ Site (15)", None, "Kept", "Kept"),
+])
+def test_scene_title_comes_from_a_name_ending_in_its_site(stem, site, llm_title, title):
+    assert classify.scene_title(f"/r/{stem}.mp4", site, llm_title) == title
+
+
+def test_numbered_web_downloads_do_not_collide(lib):
+    con, cfg = lib["con"], lib["cfg"]
+    cfg.ollama_enabled = True
+    add_files(lib, "Show Name _ Site (2).mp4", "Show Name _ Site (3).mp4", "Show Name _ Site.mp4")
+    run_to_plan(lib)
+    con.execute("UPDATE parses SET flagged=1, source='guessit' WHERE file_id IN "
+                "(SELECT id FROM files WHERE path LIKE '%Show Name%')")
+    ans = {"title": "Show Name", "year": None, "kind": "scene", "confidence": 0.8,
+           "site": "Site", "scene_date": None, "performers": None}
+    classify.classify_all(con, cfg, log=quiet, opener=llm_says(ans))
+    plan.make_plan(con, cfg, log=quiet)
+    rows = [proposal(con, f"Show Name _ Site{n}") for n in (" (2)", " (3)", ".mp4")]
+    assert {r["status"] for r in rows} == {"review"} and len({r["dst"] for r in rows}) == 3
