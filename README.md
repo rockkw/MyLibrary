@@ -162,6 +162,11 @@ Add `--json` to any command for machine-readable output (logs go to stderr).
 
 UI keys: `j`/`k` move, `a` approve, `s` skip, `e` edit, `x` select, `/` search.
 
+To identify several files at once, check them in Review and press **Edit selected**, or give
+`mylib edit` several IDs. Fill in only what they share, such as the kind and site: empty fields
+keep each file's own value, and episode and track numbers always stay per file. Files that would
+end up with the same name are left in conflict rather than approved.
+
 Try it on one root with a small `--root` first, and compare models on a sample
 of your messiest names (`mylib classify --model qwen2.5:14b --redo`).
 

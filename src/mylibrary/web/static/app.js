@@ -42,14 +42,14 @@ async function loadSummary() {
 
 // ── list ──
 const confClass = v => v >= 0.9 ? 'hi' : v >= 0.6 ? 'mid' : 'lo';
-async function loadList(keep) {
+async function loadList(keep, detail = true) {
   const qs = new URLSearchParams({status: state.status, root: state.root, q: state.q});
   const d = await api('/api/proposals?' + qs);
   state.items = d.items;
   if (!keep) { state.cur = state.items.length ? 0 : -1; state.checked.clear(); }
   else state.cur = Math.min(state.cur, state.items.length - 1);
   renderList();
-  if (state.cur >= 0) loadDetail(); else $('#detail-pane').innerHTML =
+  if (state.cur >= 0) { if (detail) loadDetail(); } else $('#detail-pane').innerHTML =
     `<p class="empty">${d.plan_id ? 'Nothing here.' : 'No plan yet: run the pipeline.'}</p>`;
 }
 function episodeCode(r) {
@@ -159,6 +159,63 @@ async function loadDetail() {
     show();
   }
 }
+// ── bulk edit ── Shared fields for every checked file; empty fields keep each file's own.
+function bulkForm() {
+  const ids = [...state.checked];
+  if (ids.length < 2) return note('Check two or more files to edit them together.', true);
+  $('#detail-pane').innerHTML = `
+    <h2>Edit ${ids.length} selected files</h2>
+    <p class="reason">Fill in only what they share. Empty fields keep each file's own value, and
+      episode numbers, episode titles and track numbers always stay per file. Each file then gets
+      its own target and is approved if nothing clashes.</p>
+    <div class="detail-label">Identify</div>
+    <div class="edit"><select id="bk-kind">
+        <option value="">Keep each file's kind</option>
+        <option value="movie">Movie</option><option value="episode">TV episode</option>
+        <option value="music">Music</option><option value="software">Software</option>
+        <option value="scene">Adult scene</option></select>
+      <input id="bk-title" placeholder="Title (empty keeps each file's own)">
+      <input id="bk-year" placeholder="Year" inputmode="numeric" data-for="movie">
+      <input id="bk-edition" placeholder="Edition" data-for="movie">
+      <div id="bk-scene" data-for="scene">
+        <input id="bk-site" placeholder="Site"><input id="bk-date" placeholder="YYYY-MM-DD">
+        <input id="bk-performers" placeholder="Performers, comma separated"></div>
+      <div id="bk-tv" data-for="episode"><input id="bk-season" placeholder="Season" inputmode="numeric"></div>
+      <div id="bk-music" data-for="music">
+        <input id="bk-artist" placeholder="Artist"><input id="bk-album" placeholder="Album">
+        <input id="bk-disc" placeholder="Disc" inputmode="numeric"></div></div>
+    <div class="btnrow"><button class="btn go" id="bk-save">Save & approve ${ids.length} files</button>
+      <button class="btn" id="bk-cancel">Cancel</button></div>
+    <div id="bk-result"></div>`;
+  const kind = $('#bk-kind');
+  const show = () => $$('[data-for]').forEach(el => el.hidden = !!kind.value && el.dataset.for !== kind.value);
+  kind.onchange = show; show();
+  $$('#detail-pane input, #detail-pane select').forEach(el => el.onkeydown = e => {
+    if (e.key === 'Enter') saveBulk(ids); e.stopPropagation(); });
+  $('#bk-save').onclick = () => saveBulk(ids);
+  $('#bk-cancel').onclick = () => loadDetail();
+}
+async function saveBulk(ids) {
+  const v = id => $(id).closest('[hidden]') ? '' : $(id).value;
+  const fields = {kind: $('#bk-kind').value, title: $('#bk-title').value, year: v('#bk-year'),
+                  edition: v('#bk-edition'), site: v('#bk-site'), scene_date: v('#bk-date'),
+                  performers: v('#bk-performers'), season: v('#bk-season'), artist: v('#bk-artist'),
+                  album: v('#bk-album'), disc: v('#bk-disc')};
+  try {
+    const r = await api('/api/edit-many', {ids, fields});
+    const c = r.counts;
+    note(`${r.cli} → ${['approved', 'review', 'conflict', 'error'].filter(k => c[k]).map(k => `${c[k]} ${k}`).join(', ')}`,
+         !!(c.review || c.conflict || c.error));
+    const left = r.results.filter(x => x.status !== 'approved');
+    $('#bk-result').innerHTML = left.length ? `<div class="detail-label">Not approved</div>` +
+      left.map(x => `<div class="reason"><span class="pill ${x.status}">${x.status}</span> #${x.id}: ${esc(x.reason || '')}</div>`).join('') :
+      `<p class="reason">All ${r.results.length} approved.</p>`;
+    state.checked.clear();
+    await loadSummary(); await loadList(true, false);  // keep the result on screen
+  } catch (e) { note(e.message, true); }
+}
+$('#bulk-edit').onclick = bulkForm;
+
 async function saveEdit() {
   const item = state.items[state.cur];
   try {

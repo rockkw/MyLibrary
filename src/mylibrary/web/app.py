@@ -163,6 +163,33 @@ def api_edit():
     return jsonify(res)
 
 
+@app.post("/api/edit-many")
+def api_edit_many():
+    body = request.get_json(force=True)
+    try:
+        ids = [int(i) for i in body.get("ids", [])]
+    except (TypeError, ValueError):
+        abort(400, "ids must be numbers")
+    if len(ids) < 2:
+        abort(400, "select two or more files")
+    fields = dict(body.get("fields") or {})
+    for key in ("year", "season", "disc"):
+        value = str(fields.get(key) or "").strip()
+        if value and not value.isdigit():
+            abort(400, f"{key} must be a number")
+        fields[key] = int(value) if value else None
+    try:
+        res = review.edit_many(con(), CFG, ids, fields)
+    except ValueError as e:
+        abort(400, str(e))
+    flags = {"kind": "--kind", "title": "--title", "year": "--year", "edition": "--edition",
+             "season": "--season", "artist": "--artist", "album": "--album", "disc": "--disc",
+             "site": "--site", "scene_date": "--date", "performers": "--performers"}
+    res["cli"] = f"mylib edit {' '.join(map(str, ids))}" + "".join(
+        f' {flag} "{fields[k]}"' for k, flag in flags.items() if fields.get(k) not in (None, ""))
+    return jsonify(res)
+
+
 @app.get("/api/runs")
 def api_runs():
     rows = con().execute("""SELECT r.*, (SELECT COUNT(*) FROM moves m WHERE m.run_id=r.id

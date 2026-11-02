@@ -51,7 +51,8 @@ def main(argv=None):
     p.add_argument("--limit", type=int, default=100)
     for name in ("approve", "skip", "reset"):
         p = sub.add_parser(name); p.add_argument("ids", type=int, nargs="+")
-    p = sub.add_parser("edit"); p.add_argument("id", type=int)
+    p = sub.add_parser("edit"); p.add_argument("id", type=int, nargs="+",
+                                                help="several IDs share the fields given")
     p.add_argument("--title", help="optional only for a scene"); p.add_argument("--year", type=int)
     p.add_argument("--edition", help='e.g. "Final Cut"; "" clears it')
     p.add_argument("--kind", choices=("movie", "episode", "music", "software", "scene"), help="change what this file is")
@@ -123,7 +124,21 @@ def main(argv=None):
         n = review.decide(con, a.ids, a.cmd)
         res = {"updated": n}
         log(f"{a.cmd}: {n} updated")
+    elif a.cmd == "edit" and len(a.id) > 1:
+        if any(v is not None for v in (a.episode, a.episode_last, a.episode_title, a.track)):
+            sys.exit("episode, last episode, episode title and track are set one file at a time")
+        try:
+            res = review.edit_many(con, cfg, a.id, {
+                "kind": a.kind, "title": a.title, "year": a.year, "edition": a.edition,
+                "season": a.season, "artist": a.artist, "album": a.album, "disc": a.disc,
+                "site": a.site, "scene_date": a.date, "performers": a.performers})
+        except ValueError as e:
+            sys.exit(str(e))
+        for r in res["results"]:
+            log(f"#{r['id']} {r['status']}: {r['dst'] or r['reason']}")
+        log(", ".join(f"{k} {v}" for k, v in sorted(res["counts"].items())))
     elif a.cmd == "edit":
+        a.id = a.id[0]
         if a.title is None and a.kind != "scene" and not (a.site or a.date or a.performers):
             sys.exit("edit needs --title")
         res = review.edit(con, cfg, a.id, a.title, a.year, a.edition, a.kind, a.season, a.episode,

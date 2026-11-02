@@ -74,6 +74,7 @@ mylib edit ID --title SERIES --season S --episode E [--episode-last N] [--episod
 mylib edit ID --title TRACK --artist A --album B [--track N] [--disc N]
 mylib edit ID --title PRODUCT --kind software
 mylib edit ID --site S --date YYYY-MM-DD --performers "A, B" [--title T]
+mylib edit ID ID ... --kind scene --site S   # shared fields; empty ones keep each file's own
 mylib apply           # dry run; --execute to rename (then auto-verify)
 mylib runs | verify --run N | undo --run N [--execute] | dupes | status
 mylib serve           # UI on http://127.0.0.1:5051

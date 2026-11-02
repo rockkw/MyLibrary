@@ -5,6 +5,9 @@ import os
 import re
 from datetime import date
 
+from collections import Counter
+
+from .classify import scene_title
 from .db import now
 from .plan import destination, needs
 
@@ -136,6 +139,61 @@ def edit(con, cfg, proposal_id: int, title: str, year: int | None,
                    WHERE id=?""", (dst, status, reason, now(), proposal_id))
     con.commit()
     return {"id": proposal_id, "dst": dst, "status": status, "reason": reason}
+
+
+# Shared by a whole selection. Episode, last episode, episode title and track stay per file.
+BULK_FIELDS = ("kind", "title", "year", "edition", "season", "artist", "album", "disc",
+               "site", "scene_date", "performers")
+KINDS = ("movie", "episode", "music", "software", "scene")
+
+
+def edit_many(con, cfg, proposal_ids, fields: dict) -> dict:
+    """Give several items the same identification, each keeping its own value for every field
+    left empty, and recompute each target with the single-edit rules.
+
+    Items that would share a target are left in conflict, none of them approved.
+    """
+    unknown = set(fields) - set(BULK_FIELDS)
+    if unknown:
+        raise ValueError(f"cannot set {', '.join(sorted(unknown))} for several files at once")
+    fields = {k: v.strip() if isinstance(v, str) else v for k, v in fields.items()}
+    fields = {k: v for k, v in fields.items() if v not in (None, "")}
+    if not fields:
+        raise ValueError("fill in at least one field")
+    if fields.get("kind") not in (None, *KINDS):
+        raise ValueError("kind must be movie, episode, music, software or scene")
+    results = []
+    for pid in dict.fromkeys(proposal_ids):
+        row = con.execute("""SELECT f.path, p.* FROM proposals pr JOIN files f ON f.id=pr.file_id
+                             LEFT JOIN parses p ON p.file_id=f.id WHERE pr.id=?""", (pid,)).fetchone()
+        cur = dict(row) if row else {}
+        given = lambda key: fields.get(key, cur.get(key))
+        kind = fields.get("kind") or (cur.get("kind") if cur.get("kind") in KINDS else None)
+        title = fields.get("title")
+        if title is None:
+            title = cur.get("title")
+            if kind == "scene" and cur:  # "Series _ Scene _ Site (15)" keeps its own words
+                title = scene_title(cur["path"], given("site"), title)
+        try:
+            results.append(edit(con, cfg, pid, title, given("year"), given("edition"), kind,
+                                given("season"), cur.get("episode"), cur.get("episode_last"),
+                                cur.get("episode_title"), given("artist"), given("album"),
+                                cur.get("track"), given("disc"), given("site"),
+                                given("scene_date"), given("performers")))
+        except ValueError as e:
+            results.append({"id": pid, "dst": None, "status": "error", "reason": str(e)})
+    by_target = {}
+    for r in results:
+        if r["dst"]:
+            by_target.setdefault(r["dst"], []).append(r)
+    for same in by_target.values():
+        for r in same if len(same) > 1 else ():
+            others = ", ".join(f"#{o['id']}" for o in same if o is not r)
+            r.update(status="conflict", reason=f"same target as selected {others}")
+            con.execute("UPDATE proposals SET status='conflict', reason=? WHERE id=?",
+                        (r["reason"], r["id"]))
+    con.commit()
+    return {"results": results, "counts": dict(Counter(r["status"] for r in results))}
 
 
 def list_proposals(con, cfg, plan_id, status=None, q=None, root=None, limit=500, offset=0):

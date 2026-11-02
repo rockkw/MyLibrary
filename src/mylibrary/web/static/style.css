@@ -219,3 +219,11 @@ tr:hover td { background: #1a1a1a; }
 #az-drill:not(:empty) { border-top: 1px solid #333; margin-top: 1rem; padding-top: 0.9rem; }
 .az-drill-head { display: flex; gap: 0.8rem; align-items: center; margin-bottom: 0.6rem; }
 .az-drill-head h4 { margin: 0; color: #f90; font-size: 0.82rem; letter-spacing: 0.05em; text-transform: uppercase; }
+
+/* Bulk edit: same look as the single edit, every group full width */
+#bk-title, #bk-edition { grid-column: 1 / -1; }
+#bk-kind { grid-column: 1 / -1; }
+#bk-scene, #bk-music { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; }
+#bk-scene input:last-child { grid-column: 1 / -1; }
+#bk-tv { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr; gap: 0.4rem; }
+#bk-scene[hidden], #bk-music[hidden], #bk-tv[hidden], #bk-year[hidden], #bk-edition[hidden] { display: none; }
