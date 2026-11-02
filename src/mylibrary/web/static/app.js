@@ -325,13 +325,18 @@ let treeNodes = [];
 const treeChanged = n => n.type === 'dir' ? n.in + n.out > 0 : ['in', 'out'].includes(n.state);
 const treeRel = p => { const r = state.tree.roots.find(x => p.startsWith(x.path + '/')); return r ? p.slice(r.path.length + 1) : p; };
 const treeFiles = n => Object.values(n.counts).reduce((a, b) => a + b, 0);
+// On Analyze the tree shows only one keyword's files, and folders count only those.
+let treeFilter = null;
+const wordFiles = n => n.type === 'dir' ? n.children.reduce((a, c) => a + wordFiles(c), 0)
+                                        : +treeFilter.paths.has(n.path);
+const treeShown = n => treeFilter ? wordFiles(n) > 0 : true;
 function treeRow(n, open) {
   const i = treeNodes.push(n) - 1;
   if (n.type === 'dir') {
-    const delta = `${n.in ? `<span class="t-in">+${n.in}</span>` : ''}${n.out ? `<span class="t-out">−${n.out}</span>` : ''}`;
+    const delta = treeFilter ? '' : `${n.in ? `<span class="t-in">+${n.in}</span>` : ''}${n.out ? `<span class="t-out">−${n.out}</span>` : ''}`;
     return `<div class="t-dir" data-n="${i}"><div class="t-row t-folder ${n.new ? 't-new' : ''}">
       <span class="t-arrow">${open ? '▾' : '▸'}</span><span class="t-name">${esc(n.name)}/</span>
-      <span class="n">${treeFiles(n)}</span>${delta}
+      <span class="n">${treeFilter ? wordFiles(n) : treeFiles(n)}</span>${delta}
       ${n.new ? '<span class="chip">new folder</span>' : ''}
       ${n.left ? '<span class="chip t-left">left behind</span>' : ''}
       ${n.error ? `<span class="chip t-left">${esc(n.error)}</span>` : ''}</div>
@@ -347,10 +352,11 @@ function treeRow(n, open) {
     ${n.symlink ? '<span class="chip">link</span>' : ''}
     ${detail ? `<span class="t-why">${esc(n.to ? '→ ' + treeRel(n.to) : n.from ? '← ' + treeRel(n.from) : detail)}</span>` : ''}</div>`;
 }
-const treeAllOpen = () => state.treeOpen ?? $('#tree-changes').checked;
+const treeAllOpen = () => !!treeFilter || (state.treeOpen ?? $('#tree-changes').checked);
 function treeKids(n) {
-  const only = $('#tree-changes').checked;
-  return n.children.filter(c => !only || treeChanged(c)).map(c => treeRow(c, treeAllOpen() && c.type === 'dir')).join('');
+  const only = $('#tree-changes').checked && !treeFilter;
+  return n.children.filter(c => treeShown(c) && (!only || treeChanged(c)))
+    .map(c => treeRow(c, treeAllOpen() && c.type === 'dir')).join('');
 }
 async function loadTree() {
   const d = await api('/api/tree' + ($('#tree-hidden').checked ? '?hidden=1' : ''));
@@ -366,12 +372,13 @@ async function loadTree() {
   renderTree();
 }
 function renderTree() {
-  treeNodes = [];
+  treeNodes = []; treeFilter = null;
   $('#tree-toggle').textContent = treeAllOpen() ? 'Collapse all' : 'Expand all';
   $('#tree').innerHTML = (state.tree?.roots || []).map(r => treeRow(r, true)).join('') ||
     '<p class="empty">No roots to show.</p>';
 }
-$('#tree').onclick = e => {
+function treeClick(e, filter) {
+  treeFilter = filter;
   const row = e.target.closest('.t-row');
   if (!row) return;
   if (row.classList.contains('t-folder')) {
@@ -385,17 +392,86 @@ $('#tree').onclick = e => {
   if (!n.proposal_id) return;
   state.status = ''; state.root = ''; state.q = base(n.from || n.path); $('#q').value = state.q;
   location.hash = '#review'; refresh();
-};
+}
+$('#tree').onclick = e => treeClick(e, null);
 $('#tree-changes').onchange = () => { state.treeOpen = null; renderTree(); };
 $('#tree-toggle').onclick = () => { state.treeOpen = !treeAllOpen(); renderTree(); };
 $('#tree-hidden').onchange = loadTree;
 $('#tree-refresh').onclick = loadTree;
+
+// ── analyze ── Read only: a keyword shows its files in a tree under the heatmap.
+const azBars = items => {
+  const top = Math.max(...items.map(i => i.count), 1);
+  return items.map(i => `<div class="bar-row" title="${esc(i.label)}: ${i.count} file(s)">
+    <span class="bar-label">${esc(i.label)}</span>
+    <span class="bar-track"><span class="bar-fill" style="width:${Math.round(i.count / top * 100)}%"></span></span>
+    <span class="bar-val">${i.count}</span></div>`).join('') || '<p class="empty">No files.</p>';
+};
+function azCloud(words) {
+  if (!words.length) return '<p class="empty">Not enough files to show keywords yet.</p>';
+  const counts = words.map(w => w.count);
+  const logs = words.map(w => Math.log(w.avg_size + 1));  // sizes span KB to GB
+  const scale = (v, lo, hi) => hi > lo ? (v - lo) / (hi - lo) : 1;
+  const [cMin, cMax, lMin, lMax] = [Math.min(...counts), Math.max(...counts), Math.min(...logs), Math.max(...logs)];
+  return '<div class="word-cloud">' + words.map((w, i) => {
+    const em = (0.72 + scale(w.count, cMin, cMax) * 1.6).toFixed(2);
+    const col = `color-mix(in srgb, #f90 ${Math.round(scale(logs[i], lMin, lMax) * 100)}%, #4af)`;
+    return `<button class="wc-word ${state.azWord?.word === w.word ? 'active' : ''}" data-i="${i}"
+      style="font-size:${em}rem;--c:${col}"
+      title="${esc(w.word)}: ${w.count} file(s), average ${fmtSize(w.avg_size)}. Click to show its files.">${esc(w.word)}</button>`;
+  }).join('') + '</div>';
+}
+async function loadAnalyze() {
+  const d = await api('/api/analyze?root=' + encodeURIComponent($('#analyze-root').value));
+  state.analyze = d;
+  $('#analyze-root').innerHTML = [['', 'All roots'], ...d.roots.map(r => [r, r])].map(([v, label]) =>
+    `<option value="${esc(v)}" ${v === d.root ? 'selected' : ''}>${esc(label)}</option>`).join('');
+  $('#analyze-wrap').innerHTML = `
+    ${d.missing.map(r => `<p class="t-banner">${esc(r)} is not mounted.</p>`).join('')}
+    ${d.error ? `<p class="t-banner">${esc(d.error)}</p>` : ''}
+    <p class="az-meta"><b>${d.total}</b> file(s) · <b>${d.words.length}</b> keyword(s)</p>
+    <div class="az-grid">
+      <div class="az-card"><h3>Files by type</h3>${azBars(d.by_type)}</div>
+      <div class="az-card"><h3>Files by state</h3>${azBars(d.by_state)}</div>
+    </div>
+    <div class="az-card"><h3>Word heatmap
+      <span class="az-legend">size = files · colour = average file size (blue = small → amber = large)</span></h3>
+      ${azCloud(d.words)}<div id="az-drill"></div></div>`;
+  if (state.azWord) azPick(d.words.find(w => w.word === state.azWord.word));
+}
+function azPick(w) {
+  state.azWord = w ? {word: w.word, paths: new Set(w.paths)} : null;
+  $$('.wc-word').forEach(el => el.classList.toggle('active', el.textContent === w?.word));
+  azDrill();
+}
+async function azDrill() {
+  const w = state.azWord;
+  if (!w) { $('#az-drill').innerHTML = ''; return; }
+  const d = await api('/api/tree');
+  if (state.azWord !== w) return;  // another word was clicked meanwhile
+  state.tree = d; treeNodes = []; treeFilter = w;
+  const roots = d.roots.filter(treeShown);
+  $('#az-drill').innerHTML = `<div class="az-drill-head">
+      <h4>"${esc(w.word)}" — ${roots.reduce((a, r) => a + wordFiles(r), 0)} file(s)</h4>
+      <button class="btn" id="az-clear">Clear</button></div>
+    <div id="az-tree">${roots.map(r => treeRow(r, true)).join('') ||
+      '<p class="empty">No files match this keyword now.</p>'}</div>`;
+  $('#az-drill').scrollIntoView({behavior: 'smooth', block: 'nearest'});
+}
+$('#analyze-root').onchange = () => { state.azWord = null; loadAnalyze(); };
+$('#analyze-wrap').onclick = e => {
+  if (e.target.id === 'az-clear') return azPick(null);
+  if (e.target.closest('#az-tree')) return treeClick(e, state.azWord);
+  const el = e.target.closest('.wc-word');
+  if (el) azPick(el.classList.contains('active') ? null : state.analyze.words[+el.dataset.i]);
+};
 
 // ── nav + events ──
 function showPage(p) {
   $$('.page').forEach(el => el.classList.toggle('active', el.id === 'page-' + p));
   $$('.nav-link').forEach(el => el.classList.toggle('active', el.dataset.page === p));
   if (p === 'tree') loadTree();
+  if (p === 'analyze') loadAnalyze();
   if (p === 'runs') loadRuns();
   if (p === 'dupes') loadDupes();
   if (p === 'leftovers') loadLeftovers();

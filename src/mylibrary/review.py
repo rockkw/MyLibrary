@@ -136,14 +136,16 @@ def edit(con, cfg, proposal_id: int, title: str, year: int | None,
     return {"id": proposal_id, "dst": dst, "status": status, "reason": reason}
 
 
-def list_proposals(con, plan_id, status=None, q=None, root=None, limit=500, offset=0):
+def list_proposals(con, cfg, plan_id, status=None, q=None, root=None, limit=500, offset=0):
     sql = """SELECT pr.*, f.size, f.duration, f.width, f.height, f.vcodec, f.acodec,
                     f.audio_langs, f.sub_langs, f.root, p.title, p.year, p.edition, p.kind, p.source,
                     p.imdb_id, p.season, p.episode, p.episode_last, p.episode_title,
                     p.artist, p.album, p.track, p.disc, p.site, p.scene_date, p.performers
              FROM proposals pr JOIN files f ON f.id=pr.file_id
              LEFT JOIN parses p ON p.file_id=f.id WHERE pr.plan_id=?"""
-    args = [plan_id]
+    in_roots, names = cfg.root_filter()
+    sql += f" AND {in_roots}"
+    args = [plan_id] + names
     if status:
         statuses = status.split(",")
         sql += f" AND pr.status IN ({','.join('?' * len(statuses))})"
@@ -179,13 +181,17 @@ def detail(con, proposal_id):
     return d
 
 
-def summary(con, plan_id):
+def summary(con, cfg, plan_id):
     out = {"plan_id": plan_id, "counts": {}, "roots": []}
+    in_roots, names = cfg.root_filter()
     if plan_id:
-        for r in con.execute("SELECT status, COUNT(*) n FROM proposals WHERE plan_id=? "
-                             "GROUP BY status", (plan_id,)):
+        for r in con.execute(f"""SELECT pr.status, COUNT(*) n FROM proposals pr
+                                 JOIN files f ON f.id=pr.file_id
+                                 WHERE pr.plan_id=? AND {in_roots} GROUP BY pr.status""",
+                             [plan_id] + names):
             out["counts"][r["status"]] = r["n"]
-    out["files"] = con.execute("SELECT COUNT(*) FROM files WHERE missing=0").fetchone()[0]
     out["roots"] = [dict(r) for r in con.execute(
-        "SELECT root, COUNT(*) n FROM files WHERE missing=0 GROUP BY root")]
+        f"SELECT f.root, COUNT(*) n FROM files f WHERE f.missing=0 AND {in_roots} GROUP BY f.root",
+        names)]
+    out["files"] = sum(r["n"] for r in out["roots"])
     return out

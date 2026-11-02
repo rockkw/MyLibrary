@@ -111,7 +111,7 @@ def main(argv=None):
                "classify": classify.classify_all(con, cfg, limit=a.limit, log=log),
                "plan": plan.make_plan(con, cfg, note="pipeline", log=log)}
     elif a.cmd == "review":
-        res = review.list_proposals(con, need_plan(), a.status, a.q, limit=a.limit)
+        res = review.list_proposals(con, cfg, need_plan(), a.status, a.q, limit=a.limit)
         for r in res:
             log(f"#{r['id']:<6} {r['status']:<9} {r['confidence']:.2f}  {r['src']}\n"
                 f"{'':<20}-> {r['dst']}   [{r['reason'] or ''}]")
@@ -141,7 +141,7 @@ def main(argv=None):
             log(f"run #{r['id']} {r['kind']:<5} plan {r['plan_id']} {r['status']:<13} "
                 f"{r['started_at']}")
     elif a.cmd == "status":
-        res = review.summary(con, plan.current_plan(con))
+        res = review.summary(con, cfg, plan.current_plan(con))
         res["config"] = str(cfg.source)
         res["db"] = str(cfg.db_file)
         res["imdb"] = imdb.available(con)

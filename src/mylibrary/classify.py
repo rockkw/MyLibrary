@@ -83,10 +83,11 @@ def classify_all(con, cfg, limit=None, redo=False, log=print, opener=None) -> di
         return stats
     where = "p.flagged=1 AND p.source='guessit'" if not redo else \
             "p.flagged=1 AND p.source IN ('guessit','llm')"
+    in_roots, names = cfg.root_filter()
     sql = f"""SELECT f.id, f.path, f.duration, p.guessit_json, p.kind FROM parses p
-              JOIN files f ON f.id=p.file_id WHERE f.missing=0 AND {where}
+              JOIN files f ON f.id=p.file_id WHERE f.missing=0 AND {in_roots} AND {where}
               ORDER BY f.id"""
-    rows = con.execute(sql + (f" LIMIT {int(limit)}" if limit else "")).fetchall()
+    rows = con.execute(sql + (f" LIMIT {int(limit)}" if limit else ""), names).fetchall()
     log(f"{len(rows)} flagged files to send to {cfg.ollama_model}")
     for i, r in enumerate(rows, 1):
         prompt = build_prompt(r["path"], r["duration"], json.loads(r["guessit_json"] or "{}"))

@@ -35,6 +35,14 @@ ffprobe  guessit   Ollama on     DB only  UI / CLI   rename    inode +
 The **Tree** tab shows every folder and file on each root, with totals, and marks what the next
 Apply would move. It uses the same check as the dry run and changes nothing.
 
+Taking a root out of `roots` (or commenting it out) stops the app planning or moving anything
+there, including items already in a plan. Its data stays in the database, so adding the root back
+restores its files and your decisions. Past runs there can still be verified and undone.
+
+The **Analyze** tab shows the most common words in your library as a heatmap, with files by type
+and state. Size is how many files, colour is average file size. Click a word to see its files in
+a tree under the heatmap, and click it again or press Clear to close it. It also changes nothing.
+
 **Adult scenes** are recognised from names like `Site.26.06.21.Performer.Title.XXX`, whether the
 file or its release folder carries it, or `[Site] Performer Title (26.10.16)` and
 `Site - Performer - Title (17.05.2026)`, and planned into

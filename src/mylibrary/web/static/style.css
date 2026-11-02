@@ -197,3 +197,25 @@ tr:hover td { background: #1a1a1a; }
 .t-quiet .t-name { color: #888; }
 .t-new .t-name { color: #8d8; }
 .chip.t-left { color: #fc8; }
+
+
+/* Analyze (MyMagnet) */
+#analyze-root { background: #1a1a1a; border: 1px solid #444; color: #eee; border-radius: 4px; padding: 0.35rem 0.6rem; font-size: 0.82rem; min-width: 260px; max-width: 100%; }
+.az-meta { font-size: 0.8rem; color: #888; margin: 0.6rem 0 1rem; }
+.az-meta b { color: #eee; }
+.az-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+.az-card { background: #1a1a1a; border: 1px solid #333; border-radius: 6px; padding: 1rem 1.2rem; margin-bottom: 1rem; }
+.az-grid .az-card { margin-bottom: 0; }
+.az-card h3 { margin: 0 0 0.8rem; color: #f90; font-size: 0.82rem; letter-spacing: 0.05em; text-transform: uppercase; }
+.az-legend { margin-left: 0.5rem; color: #888; font-size: 0.68rem; font-weight: 400; }
+.bar-row { display: grid; grid-template-columns: 130px 1fr 44px; gap: 0.6rem; align-items: center; font-size: 0.8rem; color: #ccc; padding: 0.14rem 0; }
+.bar-track { height: 12px; background: #262626; border-radius: 4px; overflow: hidden; }
+.bar-fill { display: block; height: 100%; min-width: 2px; background: #f90; border-radius: 4px; }
+.bar-val { text-align: right; color: #999; font-family: ui-monospace, monospace; font-size: 0.74rem; }
+.word-cloud { display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center; }
+.wc-word { cursor: pointer; color: var(--c); background: color-mix(in srgb, var(--c) 10%, transparent); border: 1px solid color-mix(in srgb, var(--c) 28%, transparent); border-radius: 4px; padding: 0.12em 0.4em; font-family: inherit; }
+.wc-word:hover { border-color: #f90; }
+.wc-word.active { border-color: #eee; box-shadow: 0 0 0 1px #eee; }
+#az-drill:not(:empty) { border-top: 1px solid #333; margin-top: 1rem; padding-top: 0.9rem; }
+.az-drill-head { display: flex; gap: 0.8rem; align-items: center; margin-bottom: 0.6rem; }
+.az-drill-head h4 { margin: 0; color: #f90; font-size: 0.82rem; letter-spacing: 0.05em; text-transform: uppercase; }

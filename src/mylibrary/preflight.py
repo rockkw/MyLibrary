@@ -44,6 +44,7 @@ def prepare(con, cfg, plan_id, active=None) -> dict:
                            WHERE pr.plan_id=? AND pr.status IN ('auto','approved')
                            AND pr.dst IS NOT NULL ORDER BY pr.src""", (plan_id,)).fetchall()
     ok, refused, targets = [], [], set()
+    roots = {str(r) for r in cfg.roots}
     active = active or downloads.check(cfg)
     for it in items:
         src, dst = it["src"], it["dst"]
@@ -52,7 +53,9 @@ def prepare(con, cfg, plan_id, active=None) -> dict:
             st = os.lstat(src)
         except FileNotFoundError:
             st, why = None, "source missing (run scan)"
-        if active.error:
+        if it["root"] not in roots:
+            why = "root is not in the config"
+        elif active.error:
             why = active.error
         elif src in active.paths:
             why = "still downloading"

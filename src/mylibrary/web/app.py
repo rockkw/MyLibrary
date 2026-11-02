@@ -19,7 +19,7 @@ from pathlib import Path
 
 from flask import Flask, abort, jsonify, render_template, request
 
-from mylibrary import config, db, dupes, leftovers, plan, review, tree
+from mylibrary import analyze, config, db, dupes, leftovers, plan, review, tree
 
 SRC = Path(__file__).resolve().parents[2]          # .../src
 app = Flask(__name__)
@@ -88,7 +88,7 @@ def index():
 def api_summary():
     c = con()
     pid = plan.current_plan(c)
-    s = review.summary(c, pid)
+    s = review.summary(c, CFG, pid)
     s["ollama_model"] = CFG.ollama_model if CFG.ollama_enabled else None
     s["auto_approve"] = CFG.auto_approve
     return jsonify(s)
@@ -101,7 +101,7 @@ def api_proposals():
     if not pid:
         return jsonify({"plan_id": None, "items": []})
     items = review.list_proposals(
-        c, pid, request.args.get("status") or None, request.args.get("q") or None,
+        c, CFG, pid, request.args.get("status") or None, request.args.get("q") or None,
         request.args.get("root") or None, limit=request.args.get("limit", 500, type=int),
         offset=request.args.get("offset", 0, type=int))
     return jsonify({"plan_id": pid, "items": items})
@@ -162,6 +162,11 @@ def api_runs():
     rows = con().execute("""SELECT r.*, (SELECT COUNT(*) FROM moves m WHERE m.run_id=r.id
                             AND m.status='moved') moved FROM runs r ORDER BY id DESC LIMIT 100""")
     return jsonify([dict(r) for r in rows])
+
+
+@app.get("/api/analyze")
+def api_analyze():
+    return jsonify(analyze.build(con(), CFG, root=request.args.get("root", "")))
 
 
 @app.get("/api/tree")

@@ -172,7 +172,7 @@ def test_missing_root_is_reported(lib, tmp_path):
 
 
 def test_tree_modules_stay_read_only():
-    for name in ("tree.py", "preflight.py"):
+    for name in ("tree.py", "preflight.py", "analyze.py"):
         names = set()
         for node in ast.walk(ast.parse((SRC / name).read_text())):
             if isinstance(node, ast.Import):

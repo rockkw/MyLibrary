@@ -148,23 +148,22 @@ def needs(kind) -> str:
 
 
 def make_plan(con, cfg, note="", log=print) -> dict:
-    prev = con.execute("SELECT id FROM plans WHERE superseded=0 ORDER BY id DESC LIMIT 1").fetchone()
-    carried = {}
-    if prev:
-        for r in con.execute("""SELECT file_id, dst, status FROM proposals
-                                WHERE plan_id=? AND status IN ('approved','skipped')""",
-                             (prev["id"],)):
-            carried[(r["file_id"], r["dst"])] = r["status"]
+    # Each file's latest proposal, not the last plan's: a root that left the config and came
+    # back gets its decisions again.
+    carried = {(r["file_id"], r["dst"]): r["status"] for r in con.execute(
+        """SELECT file_id, dst, status FROM proposals WHERE status IN ('approved','skipped')
+           AND id IN (SELECT MAX(id) FROM proposals GROUP BY file_id)""")}
     con.execute("UPDATE plans SET superseded=1 WHERE superseded=0")
     plan_id = con.execute("INSERT INTO plans (created_at, note) VALUES (?,?)",
                           (now(), note)).lastrowid
 
-    rows = con.execute("""SELECT f.*, p.title, p.year, p.edition, p.kind, p.source, p.confidence,
+    in_roots, names = cfg.root_filter()
+    rows = con.execute(f"""SELECT f.*, p.title, p.year, p.edition, p.kind, p.source, p.confidence,
                                  p.reasons, p.file_id, p.season, p.episode,
                                  p.episode_last, p.episode_title, p.artist, p.album,
                                  p.track, p.disc, p.site, p.scene_date, p.performers
                           FROM files f JOIN parses p ON p.file_id=f.id
-                          WHERE f.missing=0 ORDER BY f.path""").fetchall()
+                          WHERE f.missing=0 AND {in_roots} ORDER BY f.path""", names).fetchall()
     claimed, counts = {}, {}
     active = downloads.check(cfg)
     if active.error:

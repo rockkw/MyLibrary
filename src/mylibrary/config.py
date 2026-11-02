@@ -99,6 +99,12 @@ class Config:
     port: int = 5051
     source: Path | None = None
 
+    def root_filter(self, column: str = "f.root") -> tuple[str, list[str]]:
+        """SQL keeping rows from configured roots. A removed root's rows stay in the database,
+        so plans and counts must ask for this rather than trust every row."""
+        names = [str(r) for r in self.roots]
+        return f"{column} IN ({','.join('?' * len(names))})", names
+
 
 def load(path: str | os.PathLike | None = None) -> Config:
     if not path:
