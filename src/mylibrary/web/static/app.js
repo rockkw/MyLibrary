@@ -555,6 +555,10 @@ $$('.job-btn').forEach(b => b.onclick = () => startJob(b.dataset.job));
 $('#job-toggle').onclick = () => $('#jobbar').classList.toggle('open');
 
 document.addEventListener('keydown', e => {
+  if (menuOpen() || $('#about-overlay').classList.contains('open')) {  // no Review shortcuts here
+    if (e.key === 'Escape') { $('#about-overlay').classList.contains('open') ? closeAbout() : (toggleConfig(false), $('#config-btn').focus()); }
+    return;
+  }
   if (e.target.matches('input') && e.key !== 'Escape') return;
   if (e.key === 'Escape') { e.target.blur?.(); $('#apply-overlay').classList.remove('open'); return; }
   const it = state.items[state.cur];
@@ -569,5 +573,41 @@ document.addEventListener('keydown', e => {
   document.querySelector('.row.sel')?.scrollIntoView({block: 'nearest'});
 });
 
+// ── ⚙ Config menu (TASK-27) and ℹ About (TASK-26) ──
+async function loadVersion() {
+  state.version = await api('/api/version');
+  $('#app-version').textContent = state.version.label;
+}
+const menuOpen = () => $('#config-menu').classList.contains('open');
+function toggleConfig(open = !menuOpen()) {
+  $('#config-menu').classList.toggle('open', open);
+  $('#config-btn').setAttribute('aria-expanded', open);
+  if (open) $('#config-list button').focus();
+}
+async function showAbout() {
+  toggleConfig(false);
+  $('#about-body').innerHTML = '<span>Loading…</span><span></span>';
+  $('#about-overlay').classList.add('open');
+  try {
+    const v = state.version = await api('/api/version');
+    const m = v.milestone;
+    $('#app-version').textContent = v.label;
+    $('#about-body').innerHTML = [
+      ['Version', `<code>${esc(v.label)}</code>`],
+      ['Release', `v${esc(v.version)}${v.tag ? ` (tag ${esc(v.tag)})` : ' (this commit is not tagged)'}`],
+      ['Code', `commit ${esc(v.commit || 'unknown')}${v.branch ? ` on ${esc(v.branch)}` : ''}${v.dirty ? ', with uncommitted changes' : ''}`],
+      ['Milestone', m ? `${esc(m.title)}: ${m.done} of ${m.total} task(s) done` : `none named v${esc(v.version)}`],
+    ].map(([k, val]) => `<span>${k}</span><span>${val}</span>`).join('');
+  } catch (e) { $('#about-body').innerHTML = `<span>Error</span><span>${esc(e.message)}</span>`; }
+  $('#about-close').focus();
+}
+const closeAbout = () => { $('#about-overlay').classList.remove('open'); $('#config-btn').focus(); };
+$('#config-btn').onclick = e => { e.stopPropagation(); toggleConfig(); };
+$('#about-btn').onclick = showAbout;
+$('#about-close').onclick = closeAbout;
+$('#about-overlay').onclick = e => { if (e.target.id === 'about-overlay') closeAbout(); };
+document.addEventListener('click', e => { if (menuOpen() && !e.target.closest('#config-menu')) toggleConfig(false); });
+
 showPage(location.hash.slice(1) || 'review');
 refresh();
+loadVersion().catch(() => {});

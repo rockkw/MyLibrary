@@ -5,4 +5,6 @@ snapshots) and rename files without overwriting. It contains no code that
 deletes files. tests/test_no_delete.py fails the build if that changes.
 """
 
-__version__ = "0.1.0"
+from .version import read_version
+
+__version__ = read_version()  # the VERSION file; version.label() adds the commit

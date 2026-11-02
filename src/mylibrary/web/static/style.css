@@ -227,3 +227,21 @@ tr:hover td { background: #1a1a1a; }
 #bk-scene input:last-child { grid-column: 1 / -1; }
 #bk-tv { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr; gap: 0.4rem; }
 #bk-scene[hidden], #bk-music[hidden], #bk-tv[hidden], #bk-year[hidden], #bk-edition[hidden] { display: none; }
+
+/* ⚙ Config menu and About (TASK-27, as in MyMagnet). Fixed colours, never theme tokens, so a
+   bad theme can't hide the way back. */
+#config-menu { position: relative; }
+#config-btn { cursor: pointer; background: #1d1d1f; color: #e8e8e8; border: 1px solid #555; border-radius: 4px;
+  font: 0.78rem system-ui, sans-serif; padding: 0.3rem 0.7rem; white-space: nowrap; }
+#config-btn:hover, #config-menu.open #config-btn { border-color: #aaa; }
+#config-list { display: none; position: absolute; right: 0; top: calc(100% + 4px); z-index: 950; min-width: 170px;
+  background: #1d1d1f; border: 1px solid #555; border-radius: 8px; padding: 0.3rem; box-shadow: 0 8px 30px rgba(0,0,0,0.6); }
+#config-menu.open #config-list { display: block; }
+#config-list button { display: block; width: 100%; text-align: left; cursor: pointer; background: none; color: #e8e8e8;
+  border: 0; border-radius: 5px; padding: 0.45rem 0.7rem; font: 0.82rem system-ui, sans-serif; white-space: nowrap; }
+#config-list button:hover, #config-list button:focus-visible { background: #2c2c2e; outline: none; }
+#app-version { border-top: 1px solid #333; margin-top: 0.3rem; padding: 0.4rem 0.7rem 0.2rem; color: #8e8e93;
+  font: 0.72rem ui-monospace, monospace; white-space: nowrap; }
+.dialog.about { width: min(560px, 92vw); background: #1d1d1f; border-color: #555; color: #e8e8e8; }
+.dialog.about h2 { color: #e8e8e8; }
+.dialog.about .info { margin: 0.6rem 0 1.2rem; font-size: 0.84rem; }

@@ -86,7 +86,12 @@ architecture, runbook), `diagrams/` (Mermaid), `backlog/` (Backlog.md: tasks,
 decisions), `testing/` (plans, results, experiments), `config/`.
 Use the `backlog` CLI for task changes rather than hand-editing task files.
 
-## Status (2026-10-31)
-- v0.1.0 on GitHub, CI green. Not yet run on real drives.
-- Next: TASK-3 first real run on ONE SSD per `testing/plans/first-real-run-test-plan.md`.
-- Then: TASK-4 compare Ollama models, TASK-5 IMDb import.
+## Versions (TASK-26, as in MyMagnet)
+- `VERSION` holds the version (semantic versioning: PATCH = bug fixes, MINOR = features, MAJOR =
+  breaking changes); pyproject and `__version__` read it. `version.py` builds the label
+  `v<VERSION>+<commit>[.dirty]`; the UI shows it next to the title, `/api/version` returns it,
+  `mylib serve` logs it at start-up and `mylib --version` prints it.
+- A release: bump `VERSION`, add a `CHANGELOG.md` entry from the Done tasks, create the backlog
+  milestone `v<VERSION>` (`backlog milestone add`) and assign the shipped tasks
+  (`backlog task edit <id> -m v<VERSION>`), commit, then `git tag -a v<VERSION>`. Only bump or
+  tag when Rock asks.

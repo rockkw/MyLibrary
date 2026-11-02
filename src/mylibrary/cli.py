@@ -28,7 +28,7 @@ import argparse
 import json
 import sys
 
-from . import __version__, apply as applymod, classify, config, db, downloads, dupes, imdb
+from . import version, apply as applymod, classify, config, db, downloads, dupes, imdb
 from . import leftovers, parse, plan, review, scan
 
 
@@ -36,7 +36,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="mylib", description="MyLibrary movie organizer")
     ap.add_argument("--config", help="path to config.ini")
     ap.add_argument("--json", action="store_true", help="JSON output; logs to stderr")
-    ap.add_argument("--version", action="version", version=__version__)
+    ap.add_argument("--version", action="version", version=f"%(prog)s {version.label()}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("scan"); p.add_argument("--root", action="append")

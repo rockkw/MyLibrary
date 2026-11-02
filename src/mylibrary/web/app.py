@@ -19,7 +19,7 @@ from pathlib import Path
 
 from flask import Flask, abort, jsonify, render_template, request
 
-from mylibrary import analyze, config, db, dupes, leftovers, plan, review, tree
+from mylibrary import analyze, config, db, dupes, leftovers, plan, review, tree, version
 
 SRC = Path(__file__).resolve().parents[2]          # .../src
 app = Flask(__name__)
@@ -190,6 +190,12 @@ def api_edit_many():
     return jsonify(res)
 
 
+@app.get("/api/version")
+def api_version():
+    v = version.current()
+    return jsonify({**v, "milestone": version.milestone(version=v["version"])})
+
+
 @app.get("/api/runs")
 def api_runs():
     rows = con().execute("""SELECT r.*, (SELECT COUNT(*) FROM moves m WHERE m.run_id=r.id
@@ -256,7 +262,7 @@ def api_jobs():
 def serve():
     if CFG.host in ("0.0.0.0", "::"):
         sys.exit("refusing to listen on all interfaces; use 127.0.0.1 or your Tailscale IP")
-    print(f"MyLibrary UI on http://{CFG.host}:{CFG.port}")
+    print(f"MyLibrary {version.label()} running at http://{CFG.host}:{CFG.port}", flush=True)
     app.run(host=CFG.host, port=CFG.port, debug=False, threaded=True)
     return 0
 

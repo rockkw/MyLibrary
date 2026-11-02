@@ -16,6 +16,14 @@
   <a class="nav-link" data-page="dupes" href="#dupes">Duplicates</a>
   <a class="nav-link" data-page="leftovers" href="#leftovers">Leftovers</a>
   <div id="stats-bar"></div>
+  <!-- Settings and admin pages (TASK-27). Fixed colours, so a theme can't hide them. -->
+  <div id="config-menu">
+    <button id="config-btn" aria-haspopup="menu" aria-expanded="false" title="Settings and version">⚙ Config ▾</button>
+    <div id="config-list" role="menu">
+      <button id="about-btn" role="menuitem">ℹ About</button>
+      <div id="app-version" title="Version (TASK-26)"></div>
+    </div>
+  </div>
 </div>
 
 <!-- ── Tree: read only ── -->
@@ -100,6 +108,14 @@
 </div>
 
 <!-- ── Apply dialog ── -->
+<div id="about-overlay" class="overlay" role="dialog" aria-label="About MyLibrary">
+  <div class="dialog about">
+    <h2>ℹ About MyLibrary</h2>
+    <div id="about-body" class="info"></div>
+    <div class="btns"><button class="cancel" id="about-close">Close</button></div>
+  </div>
+</div>
+
 <div id="apply-overlay" class="overlay">
   <div class="dialog">
     <h2>Apply plan <span id="apply-plan"></span></h2>
