@@ -89,7 +89,7 @@ Use the `backlog` CLI for task changes rather than hand-editing task files.
 ## Versions (TASK-26, as in MyMagnet)
 - `VERSION` holds the version (semantic versioning: PATCH = bug fixes, MINOR = features, MAJOR =
   breaking changes); pyproject and `__version__` read it. `version.py` builds the label
-  `v<VERSION>+<commit>[.dirty]`; the UI shows it next to the title, `/api/version` returns it,
+  `v<VERSION>+<commit>[.dirty]`; the UI shows it under ⚙ Config (and in ℹ About), `/api/version` returns it,
   `mylib serve` logs it at start-up and `mylib --version` prints it.
 - A release: bump `VERSION`, add a `CHANGELOG.md` entry from the Done tasks, create the backlog
   milestone `v<VERSION>` (`backlog milestone add`) and assign the shipped tasks
