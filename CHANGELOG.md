@@ -7,6 +7,19 @@ to the title in the web UI, with release, commit and milestone details on hover.
 `mylib --version` prints it too. Each version has a git tag `v<version>` and a
 backlog milestone of the same name.
 
+## v1.2.0 — 2026-11-03
+
+See where the space goes from the Tree tab. Backlog milestone `v1.2.0` lists
+the tasks it contains.
+
+### Web UI
+- A Show sizes checkbox in the Tree tab tools shows the total size of every
+  folder and root in MB, GB or TB. Totals come from the same read-only walk,
+  count only files on disk now (planned incoming rows are not counted twice;
+  files marked for trash still count), follow Show hidden files, and stay
+  correct with Only changes on. Toggling it redraws the tree without fetching
+  it again. File rows use the same units (TASK-32).
+
 ## v1.1.0 — 2026-11-03
 
 Play and trash files straight from the Tree tab. Backlog milestone `v1.1.0`
