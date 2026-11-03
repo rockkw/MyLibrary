@@ -67,6 +67,10 @@ enabled = false
 url = http://127.0.0.1:9091/transmission/rpc
 user =
 password =
+; mylib downloads --pause-dupes (TASK-33) pauses a torrent holding a media file the library
+; already has, proven by the torrent's SHA-1 piece checksums. Media files smaller than this
+; are not checked. Pausing is the only change ever made to a torrent; resume it in Transmission.
+dupe_min_mb = 1
 
 [thresholds]
 ; Proposals at or above this confidence are auto-approved.

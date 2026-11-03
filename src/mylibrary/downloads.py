@@ -1,4 +1,4 @@
-"""Ask the download client what is unfinished. Read-only: it never changes a torrent.
+"""Ask the download client what is unfinished. `check` is read-only: it never changes a torrent.
 
 A real run moved episodes Transmission was still writing, and it re-created one at
 its old path. So a whole torrent is off limits until it finishes, including files in
@@ -19,6 +19,9 @@ from dataclasses import dataclass, field
 FIELDS = ["name", "downloadDir", "files", "leftUntilDone", "percentDone",
           "metadataPercentComplete", "status"]
 CHECKING = (1, 2)  # queued to verify, verifying
+# torrent-get reads. torrent-stop (pause) is the one change MyLibrary may make, and only
+# torrentdupes asks for it. Removing a torrent or its data is never allowed.
+METHODS = {"torrent-get", "torrent-stop"}
 
 
 @dataclass
@@ -29,27 +32,45 @@ class Active:
     error: str | None = None
 
 
-def _post(cfg, session: str, opener):
+def _post(cfg, session: str, opener, method="torrent-get", arguments=None):
+    if method not in METHODS:
+        raise ValueError(f"RPC method not allowed: {method}")
     headers = {"Content-Type": "application/json", "X-Transmission-Session-Id": session}
     if cfg.transmission_user or cfg.transmission_password:
         login = f"{cfg.transmission_user}:{cfg.transmission_password}".encode()
         headers["Authorization"] = "Basic " + base64.b64encode(login).decode()
-    body = json.dumps({"method": "torrent-get", "arguments": {"fields": FIELDS}}).encode()
+    body = json.dumps({"method": method,
+                       "arguments": {"fields": FIELDS} if arguments is None else arguments}).encode()
     req = urllib.request.Request(cfg.transmission_url, data=body, headers=headers)
     with opener(req, timeout=10) as resp:
         return json.loads(resp.read())
 
 
-def _torrents(cfg, opener) -> list[dict]:
+def call(cfg, opener, method="torrent-get", arguments=None) -> dict:
     try:
-        data = _post(cfg, "", opener)
+        data = _post(cfg, "", opener, method, arguments)
     except urllib.error.HTTPError as e:
         if e.code != 409:  # 409 hands over the session id to retry with
             raise
-        data = _post(cfg, e.headers.get("X-Transmission-Session-Id", ""), opener)
+        data = _post(cfg, e.headers.get("X-Transmission-Session-Id", ""), opener, method, arguments)
     if data.get("result") != "success":
         raise ValueError(str(data.get("result"))[:200])
-    return data.get("arguments", {}).get("torrents", [])
+    return data.get("arguments", {})
+
+
+def _torrents(cfg, opener, fields=None) -> list[dict]:
+    args = None if fields is None else {"fields": fields}
+    return call(cfg, opener, "torrent-get", args).get("torrents", [])
+
+
+def describe(e: Exception) -> str:
+    """A short reason for a failed call, never including the login."""
+    if isinstance(e, urllib.error.HTTPError):
+        why = "login refused: check [transmission] user and password" if e.code == 401 \
+            else f"HTTP {e.code}"
+        return f"cannot check downloads ({why})"
+    reason = getattr(e, "reason", e)
+    return f"cannot check downloads ({type(e).__name__}: {reason})"[:200]
 
 
 def _unfinished(t: dict) -> bool:
@@ -64,13 +85,8 @@ def check(cfg, opener=urllib.request.urlopen) -> Active:
         return Active()
     try:
         torrents = _torrents(cfg, opener)
-    except urllib.error.HTTPError as e:
-        why = "login refused: check [transmission] user and password" if e.code == 401 \
-            else f"HTTP {e.code}"
-        return Active(error=f"cannot check downloads ({why})")
-    except (urllib.error.URLError, OSError, ValueError) as e:
-        reason = getattr(e, "reason", e)
-        return Active(error=f"cannot check downloads ({type(e).__name__}: {reason})"[:200])
+    except (urllib.error.URLError, OSError, ValueError) as e:  # HTTPError is a URLError
+        return Active(error=describe(e))
     out = Active()
     for t in torrents:
         unfinished = _unfinished(t)

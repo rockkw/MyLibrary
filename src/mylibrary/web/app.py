@@ -20,8 +20,8 @@ from pathlib import Path
 
 from flask import Flask, abort, jsonify, render_template, request, send_file
 
-from mylibrary import (analyze, config, db, dupes, leftovers, plan, player, review, trash, tree,
-                       version)
+from mylibrary import (analyze, config, db, dupes, leftovers, plan, player, review,
+                       torrentdupes, trash, tree, version)
 
 SRC = Path(__file__).resolve().parents[2]          # .../src
 app = Flask(__name__)
@@ -43,6 +43,7 @@ JOBS = {
     "verify":    (lambda p: ["verify", "--run", _int(p, "run")], "Verify run"),
     "undo_dry":  (lambda p: ["undo", "--run", _int(p, "run")], "Undo (dry run)"),
     "undo":      (lambda p: ["undo", "--run", _int(p, "run"), "--execute"], "Undo run"),
+    "pause_dupes": (lambda p: ["downloads", "--pause-dupes"], "Pause duplicate downloads"),
     "leftovers_clean": (lambda p: ["leftovers", *_clean_args(p), "--execute"],
                         "Move approved leftover folders aside"),
 }
@@ -279,6 +280,11 @@ def api_leftovers():
 @app.get("/api/dupes")
 def api_dupes():
     return jsonify(dupes.find(con()))
+
+
+@app.get("/api/torrent-dupes")
+def api_torrent_dupes():
+    return jsonify(torrentdupes.listing(con()))
 
 
 @app.post("/api/jobs")

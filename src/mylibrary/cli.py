@@ -20,6 +20,8 @@
   mylib leftovers --clean PATH    dry run; add --execute to move it aside (never deleted)
   mylib trash PATH...             mark files; the next apply --execute moves them to trash
   mylib trash [--clear PATH...]   list marks, or take them off (nothing is ever deleted)
+  mylib downloads [--pause-dupes] unfinished torrents holding a file the library has (checksums);
+                                  --pause-dupes pauses them (never removes a torrent)
   mylib imdb-import FILE          optional offline IMDb title data
   mylib serve                     start the review UI (default http://127.0.0.1:5051)
 
@@ -32,7 +34,7 @@ import os
 import sys
 
 from . import version, apply as applymod, classify, config, db, downloads, dupes, imdb
-from . import leftovers, parse, plan, review, scan, trash
+from . import leftovers, parse, plan, review, scan, torrentdupes, trash
 
 
 def main(argv=None):
@@ -79,6 +81,9 @@ def main(argv=None):
     p = sub.add_parser("trash", help="mark files to move to trash on the next apply")
     p.add_argument("paths", nargs="*", metavar="PATH", help="files to mark; none lists the marks")
     p.add_argument("--clear", action="store_true", help="take the mark off these files")
+    p = sub.add_parser("downloads", help="find torrents that would download a file the library has")
+    p.add_argument("--pause-dupes", action="store_true",
+                   help="pause them in Transmission, once each (never removes anything)")
     p = sub.add_parser("imdb-import"); p.add_argument("file")
     sub.add_parser("serve")
 
@@ -220,6 +225,23 @@ def main(argv=None):
         for r in res:
             log(f"  {r['path']}  ({(r['size'] or 0) / 1e6:.1f} MB, marked {r['marked_at']})")
         log(f"{len(res)} files marked for trash")
+    elif a.cmd == "downloads":
+        res = (torrentdupes.pause_dupes(con, cfg, log=log) if a.pause_dupes
+               else torrentdupes.find(con, cfg))
+        if res["error"]:  # an exit code here would fail the 5-minute timer whenever Transmission is closed
+            log(f"WARN {res['error']}; nothing checked")
+        else:
+            log(f"{res['checked']} unfinished torrents checked by checksum, "
+                f"{len(res['waiting'])} still fetching metadata, "
+                f"{len(res['unverifiable'])} without v1 checksums")
+            for d in res["dupes"]:
+                log(f"  [duplicate] {d['torrent']}\n      {d['file']}\n"
+                    f"      same {d['pieces']} piece checksums as {d['match']}")
+            if res["skipped"]:
+                log(f"  {len(res['skipped'])} paused before and not checked again "
+                    "(resume them in Transmission; they stay resumed)")
+            if not a.pause_dupes and res["dupes"]:
+                log("Nothing was paused: add --pause-dupes.")
     elif a.cmd == "imdb-import":
         res = {"rows": imdb.import_basics(con, a.file, log=log)}
     if a.json:

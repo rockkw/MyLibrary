@@ -21,12 +21,21 @@ def unit(name):
 
 def test_every_unit_is_present():
     assert {p.name for p in UNITS.glob("mylibrary-*")} == {
-        "mylibrary-web.service", "mylibrary-pipeline.service", "mylibrary-pipeline.timer"}
+        "mylibrary-web.service", "mylibrary-pipeline.service", "mylibrary-pipeline.timer",
+        "mylibrary-dupes.service", "mylibrary-dupes.timer"}
 
 
 def test_nothing_but_the_ui_and_the_pipeline_runs():
     assert unit("mylibrary-web.service")["Service"]["ExecStart"] == "%h/.local/bin/mylib serve"
     assert unit("mylibrary-pipeline.service")["Service"]["ExecStart"] == "%h/.local/bin/mylib pipeline"
+    assert unit("mylibrary-dupes.service")["Service"]["ExecStart"] == \
+        "%h/.local/bin/mylib downloads --pause-dupes"
+
+
+def test_the_dupes_timer_runs_every_five_minutes():
+    timer = unit("mylibrary-dupes.timer")["Timer"]
+    assert timer["OnUnitActiveSec"] == "5min" and "OnStartupSec" in timer
+    assert "Unit" not in timer  # so it starts mylibrary-dupes.service
 
 
 def test_no_unit_can_apply_undo_or_clean():

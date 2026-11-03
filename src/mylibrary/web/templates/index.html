@@ -97,6 +97,14 @@
 
 <div id="page-dupes" class="page"><div class="pad">
   <p class="side-note">Report only. MyLibrary never removes duplicates; decide and delete yourself.</p>
+  <h2>Paused downloads</h2>
+  <p class="side-note">Every 5 minutes, unfinished torrents are checked against the library by their
+    piece checksums. A torrent holding a file you already have is paused once; resume it in
+    Transmission and it is left alone. Nothing is ever removed.</p>
+  <div class="btnrow"><button class="btn" id="tdupes-check">Check now</button></div>
+  <pre id="tdupes-log" class="cli"></pre>
+  <div id="tdupes"></div>
+  <h2>In the library</h2>
   <div id="dupes"></div></div></div>
 
 <!-- ── Job bar ── -->

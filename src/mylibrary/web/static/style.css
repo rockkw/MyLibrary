@@ -282,3 +282,4 @@ tr:hover td { background: #1a1a1a; }
 /* Tree sizes (TASK-32): folder totals show only with Show sizes checked. */
 .t-row .t-size { display: none; color: #8ab; }
 #tree.sizes .t-row .t-size { display: inline; }
+#page-dupes h2 { color: #f90; font-size: 1.05rem; margin: 1rem 0 0.4rem; }

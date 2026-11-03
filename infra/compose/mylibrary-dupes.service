@@ -1,0 +1,15 @@
+# Pause any unfinished torrent that would download a file the library already has, proven by
+# the torrent's SHA-1 piece checksums. Started by mylibrary-dupes.timer. Pausing is the only
+# change it makes to Transmission; it never removes a torrent, and it never renames files.
+[Unit]
+Description=MyLibrary: pause duplicate downloads
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h
+ExecStart=%h/.local/bin/mylib downloads --pause-dupes
+Environment=PYTHONUNBUFFERED=1
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=yes

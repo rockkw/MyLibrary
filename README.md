@@ -172,13 +172,13 @@ of your messiest names (`mylib classify --model qwen2.5:14b --redo`).
 
 ## Run as a service
 
-The UI and a nightly pipeline run as systemd user units:
+The UI, a nightly pipeline and a 5-minute duplicate-download check run as systemd user units:
 
 ```bash
 mkdir -p ~/.config/systemd/user
 cp infra/compose/mylibrary-* ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now mylibrary-web mylibrary-pipeline.timer
+systemctl --user enable --now mylibrary-web mylibrary-pipeline.timer mylibrary-dupes.timer
 ```
 
 - **Config:** the units find `config.ini` as the command line does, through `MYLIBRARY_CONFIG` or
@@ -187,9 +187,13 @@ systemctl --user enable --now mylibrary-web mylibrary-pipeline.timer
 - **Nightly pipeline:** it runs at 03:17 and only scans, parses, classifies and plans. It never
   applies. It skips the night if an apply or undo is running, and a run missed while the machine
   was off runs at the next start.
+- **Duplicate downloads (TASK-33):** every 5 minutes `mylib downloads --pause-dupes` compares each
+  unfinished torrent's SHA-1 piece checksums with library files of the same size, and pauses a
+  torrent if any media file in it is already in the library. It pauses each torrent once, so
+  resuming it in Transmission sticks, and it never removes a torrent. Needs `[transmission]` enabled.
 - **Restarting the UI:** use `systemctl --user restart mylibrary-web`. A job the UI started, such
   as an apply, runs on to the end.
-- **Logs:** `journalctl --user -u mylibrary-web` and `journalctl --user -u mylibrary-pipeline`.
+- **Logs:** `journalctl --user -u mylibrary-web` and `journalctl --user -u mylibrary-pipeline` (and `-u mylibrary-dupes`).
 - **Without a login:** user units run only while you are logged in. To start them at boot and run
   the timer when nobody is logged in, run `loginctl enable-linger` once.
 
@@ -206,7 +210,7 @@ src/mylibrary/        core: config, db, scan, parse, classify, imdb, plan, revie
 src/mylibrary/cli.py  the `mylib` CLI
 src/mylibrary/web/    Flask UI (app.py, templates/, static/)
 tests/                pytest, including the no-delete guard
-infra/compose/        systemd user units (UI service, nightly pipeline timer)
+infra/compose/        systemd user units (UI service, nightly pipeline timer, 5-minute dupes timer)
 .github/workflows/    CI: runs the tests on every push
 mylib.py              run-from-repo shim
 ```

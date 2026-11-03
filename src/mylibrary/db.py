@@ -102,6 +102,19 @@ CREATE TABLE IF NOT EXISTS trash (   -- TASK-31: files marked to move to trash
     run_id      INTEGER,
     dst         TEXT
 );
+CREATE TABLE IF NOT EXISTS torrent_dupes (  -- TASK-33: torrents holding a file we already have
+    id          INTEGER PRIMARY KEY,
+    hash        TEXT NOT NULL,      -- torrent info hash
+    torrent     TEXT,
+    file        TEXT NOT NULL,      -- the file's name inside the torrent
+    length      INTEGER,
+    match       TEXT,               -- library file whose piece checksums match
+    pieces      INTEGER,            -- pieces compared
+    found_at    TEXT,
+    paused_at   TEXT,               -- set once: a torrent paused before is never paused again
+    error       TEXT,
+    UNIQUE(hash, file)
+);
 CREATE TABLE IF NOT EXISTS moves (
     id          INTEGER PRIMARY KEY,
     run_id      INTEGER REFERENCES runs(id),

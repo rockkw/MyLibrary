@@ -95,6 +95,7 @@ class Config:
     transmission_url: str = "http://127.0.0.1:9091/transmission/rpc"
     transmission_user: str = ""
     transmission_password: str = ""
+    dupe_min_mb: float = 1.0
     host: str = "127.0.0.1"
     port: int = 5051
     source: Path | None = None
@@ -164,6 +165,7 @@ def load(path: str | os.PathLike | None = None) -> Config:
         transmission_url=get("transmission", "url", "http://127.0.0.1:9091/transmission/rpc"),
         transmission_user=get("transmission", "user"),
         transmission_password=password,
+        dupe_min_mb=float(get("transmission", "dupe_min_mb", "1")),
         host=get("server", "host", "127.0.0.1"),
         port=int(get("server", "port", "5051")),
         source=path if path.exists() else None,

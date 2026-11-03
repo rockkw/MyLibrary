@@ -378,6 +378,22 @@ async function loadDupes() {
     ${esc(f.vcodec || '')} ${fmtSize(f.size)} — ${esc(f.path)}</div>`).join('')}</div>`).join('');
   $('#dupes').innerHTML = (ex || sm) ? ex + sm : '<p class="empty">No duplicates found.</p>';
 }
+async function loadTorrentDupes() {
+  const rows = await api('/api/torrent-dupes');
+  const byHash = {};
+  rows.forEach(r => (byHash[r.hash] = byHash[r.hash] || []).push(r));
+  $('#tdupes').innerHTML = Object.values(byHash).map(g => `<div class="card"><h3>${esc(g[0].torrent)}</h3>
+    <span class="chip">${g[0].paused_at ? `paused ${esc(g[0].paused_at)}` : 'not paused'}</span>
+    ${g[0].error ? `<div class="reason">${esc(g[0].error)}</div>` : ''}
+    ${g.map(r => `<div class="from">${esc(r.file)} · ${fmtSize(r.length)}</div>
+      <div>same ${r.pieces} piece checksums as ${esc(r.match)}</div>`).join('')}</div>`).join('') ||
+    '<p class="empty">No download has been paused as a duplicate.</p>';
+}
+$('#tdupes-check').onclick = async () => {
+  $('#tdupes-log').textContent = '';
+  await startJob('pause_dupes', {}, $('#tdupes-log'));
+  loadTorrentDupes();
+};
 
 // ── tree ── Read only: clicking a video plays it in an overlay (TASK-30); other files and
 // the ↗ review link jump to the file's Review entry.
@@ -751,7 +767,7 @@ function showPage(p) {
   if (p === 'tree') loadTree();
   if (p === 'analyze') loadAnalyze();
   if (p === 'runs') loadRuns();
-  if (p === 'dupes') loadDupes();
+  if (p === 'dupes') { loadDupes(); loadTorrentDupes(); }
   if (p === 'leftovers') loadLeftovers();
 }
 window.onhashchange = () => showPage(location.hash.slice(1) || 'review');

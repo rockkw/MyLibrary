@@ -51,6 +51,11 @@ overwrite a file.**
 - Unfinished torrents are off limits, finished files in them included. `downloads.check`
   is read-only; its `.error` means unknown, so nothing auto-approves or applies. Never log
   the Transmission password.
+- Duplicate downloads (TASK-33): `torrentdupes` proves a duplicate only by SHA-1 piece checksums
+  from the .torrent file (3-piece sample, then every whole piece), never by name. The one change
+  MyLibrary may make to Transmission is `torrent-stop` (pause); `downloads.METHODS` allows only
+  `torrent-get` and `torrent-stop`, and a test bans naming any other torrent-changing method. A
+  torrent paused once (`torrent_dupes.paused_at`) is never paused or checked again, so a resume sticks.
 - When testing on real media: dry run first (`mylib apply` without `--execute`).
   Never run `--execute` or `undo --execute` on real drives without Rock's explicit OK.
 
@@ -63,10 +68,10 @@ overwrite a file.**
 
 ## Layout
 ```
-src/mylibrary/   config db scan parse classify imdb plan review preflight apply safefs dupes tree analyze player trash cli
+src/mylibrary/   config db scan parse classify imdb plan review preflight apply safefs dupes tree analyze player trash torrentdupes cli
 src/mylibrary/web/  Flask UI (MyMagnet look: #111 bg, #f90 amber, three panes)
 tests/           pytest
-infra/compose/   systemd user units (web service, nightly pipeline timer: no renames)
+infra/compose/   systemd user units (web service, nightly pipeline timer: no renames, 5-minute dupes timer)
 mylib.py         run-from-repo shim
 ```
 
@@ -84,6 +89,7 @@ mylib edit ID ID ... --kind scene --site S   # shared fields; empty ones keep ea
 mylib apply           # dry run; --execute to rename (then auto-verify)
 mylib trash PATH...   # mark for trash; the next apply --execute moves them; trash [--clear PATH...]
 mylib runs | verify --run N | undo --run N [--execute] | dupes | status
+mylib downloads [--pause-dupes]   # torrents holding a file the library has; pause them once
 mylib serve           # UI on http://127.0.0.1:5051
 ```
 

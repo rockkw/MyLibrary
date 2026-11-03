@@ -1,0 +1,10 @@
+# Runs mylibrary-dupes.service every 5 minutes, starting 2 minutes after login.
+[Unit]
+Description=Check downloads for duplicates every 5 minutes
+
+[Timer]
+OnStartupSec=2min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target
