@@ -278,3 +278,7 @@ tr:hover td { background: #1a1a1a; }
 .player-nav:hover:not(:disabled) { border-color: #f90; }
 .player-nav:disabled { color: #555; cursor: default; }
 .player-pos { font-size: 0.75rem; color: #777; white-space: nowrap; }
+
+/* Tree sizes (TASK-32): folder totals show only with Show sizes checked. */
+.t-row .t-size { display: none; color: #8ab; }
+#tree.sizes .t-row .t-size { display: inline; }

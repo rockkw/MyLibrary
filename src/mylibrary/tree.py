@@ -2,6 +2,7 @@
 
 Video files carry a `play` path for the in-page player (player.py checks it again), and files
 that may be marked for trash carry `trash_ok`; marked files show state "trash" (TASK-31).
+Folders carry `bytes`, the size of the files listed under them now (TASK-32).
 
 The disk is the source, because the database tracks only media. Moves come from
 preflight.prepare, the same check apply runs, so this preview matches the dry run.
@@ -34,7 +35,7 @@ def playable(path: str, cfg) -> bool:
 
 def _blank_dir(name: str, path: str, new: bool = False) -> dict:
     return {"type": "dir", "name": name, "path": path, "new": new, "children": [],
-            "counts": dict.fromkeys(GROUPS, 0), "in": 0, "out": 0, "trash": 0, "left": False}
+            "counts": dict.fromkeys(GROUPS, 0), "in": 0, "out": 0, "trash": 0, "bytes": 0, "left": False}
 
 
 def _trash_marks(con, cfg, active) -> dict:
@@ -143,7 +144,7 @@ def _total(node: dict, keep: set, cfg) -> int:
     for c in node["children"]:
         if c["type"] == "dir":
             remaining += _total(c, keep, cfg)
-            for key in ("in", "out", "trash"):
+            for key in ("in", "out", "trash", "bytes"):
                 node[key] += c[key]
             for group in GROUPS:
                 node["counts"][group] += c["counts"][group]
@@ -152,6 +153,7 @@ def _total(node: dict, keep: set, cfg) -> int:
             remaining += group_of(c["name"], cfg) != "other"
         else:
             node["counts"][c["group"]] += 1
+            node["bytes"] += c["size"] or 0  # on disk now, so incoming rows never count
             binned = c["state"] == "trash" and not c.get("trash_refused")
             leaving = c["state"] == "out" or binned
             node["out"] += leaving
@@ -186,4 +188,5 @@ def build(con, cfg, hidden: bool = False) -> dict:
     return {"plan_id": plan_id, "roots": trees, "missing": missing, "error": active.error,
             "stale": bool(plan and scanned and scanned > plan["created_at"]),
             "totals": {g: sum(t["counts"][g] for t in trees) for g in GROUPS},
-            "moves": sum(t["in"] for t in trees), "trash": sum(t["trash"] for t in trees)}
+            "moves": sum(t["in"] for t in trees), "trash": sum(t["trash"] for t in trees),
+            "bytes": sum(t["bytes"] for t in trees)}

@@ -76,6 +76,8 @@ function renderList() {
 }
 
 // ── detail ──
+// Tree sizes (TASK-32): decimal units, one decimal, moving up a unit before it would read 1000.0.
+const fmtUnits = b => { for (const [u, d] of [['TB', 1e12], ['GB', 1e9]]) if (b >= d * 0.99995) return (b / d).toFixed(1) + ' ' + u; return b > 0 && b < 5e4 ? '< 0.1 MB' : (b / 1e6).toFixed(1) + ' MB'; };
 const fmtSize = b => b > 1e9 ? (b / 1e9).toFixed(2) + ' GB' : (b / 1e6).toFixed(0) + ' MB';
 async function loadDetail() {
   const item = state.items[state.cur];
@@ -398,6 +400,7 @@ function treeRow(n, open) {
     return `<div class="t-dir" data-n="${i}"><div class="t-row t-folder ${n.new ? 't-new' : ''}">
       <span class="t-arrow">${open ? '▾' : '▸'}</span><span class="t-name">${esc(n.name)}/</span>
       <span class="n">${treeFilter ? wordFiles(n) : treeFiles(n)}</span>${delta}
+      ${treeFilter ? '' : `<span class="t-size" title="Size of the files in this folder now">${fmtUnits(n.bytes || 0)}</span>`}
       ${n.new ? '<span class="chip">new folder</span>' : ''}
       ${n.left ? '<span class="chip t-left">left behind</span>' : ''}
       ${n.error ? `<span class="chip t-left">${esc(n.error)}</span>` : ''}</div>
@@ -408,7 +411,7 @@ function treeRow(n, open) {
   const tip = n.play ? 'Play' + (detail ? ' · ' + detail : '') : detail;
   return `<div class="t-row t-file ${mark ? 't-' + mark[1] : ''} ${n.play || n.proposal_id ? 't-link' : ''}" data-n="${i}" title="${esc(tip)}">
     ${n.play ? '<span class="t-play" aria-hidden="true">▶</span>' : ''}<span class="t-name">${esc(n.name)}</span>
-    ${n.size != null ? `<span class="n">${fmtSize(n.size)}</span>` : ''}
+    ${n.size != null ? `<span class="n">${fmtUnits(n.size)}</span>` : ''}
     ${mark ? `<span class="chip ${n.state === 'trash' ? 't-trash-chip' : ''}">${mark[0]}</span>` : ''}
     ${n.torrent ? `<span class="chip t-off">in torrent</span>` : ''}
     ${n.symlink ? '<span class="chip">link</span>' : ''}
@@ -565,6 +568,10 @@ $('#tree').onclick = e => treeClick(e, null);
 $('#tree-changes').onchange = () => { state.treeOpen = null; renderTree(); };
 $('#tree-toggle').onclick = () => { state.treeOpen = !treeAllOpen(); renderTree(); };
 $('#tree-hidden').onchange = loadTree;
+// Only a class changes, so open folders stay open and nothing is fetched again.
+const showSizes = () => $('#tree').classList.toggle('sizes', $('#tree-sizes').checked);
+$('#tree-sizes').onchange = showSizes;
+showSizes();
 $('#tree-refresh').onclick = loadTree;
 
 // ── move to trash (TASK-31) ── Marks are decisions in the database; the next Apply moves the
