@@ -7,6 +7,28 @@ to the title in the web UI, with release, commit and milestone details on hover.
 `mylib --version` prints it too. Each version has a git tag `v<version>` and a
 backlog milestone of the same name.
 
+## v1.1.0 — 2026-11-03
+
+Play and trash files straight from the Tree tab. Backlog milestone `v1.1.0`
+lists the tasks it contains.
+
+### Web UI
+- Click a video in the tree to play it in an overlay over the page, with
+  seeking, full screen, Open in Review, and ◀ ▶ arrows (or P and N) to step
+  through the videos in the tree. Streaming is read only and limited to video
+  files inside a configured root; formats browsers cannot play (AC3/EAC3/DTS
+  audio, HEVC, .avi, .wmv, .ts) get a clear warning (TASK-30).
+- Move to trash from the tree or the player: marking a file only records the
+  decision. The next Apply moves it into `.mylibrary-safety/run-N/trash/`, and
+  Undo puts it back. Changed, downloading and torrent-held files are refused,
+  and marked files are held out of the plan. Nothing is deleted; disk space
+  comes back when you remove the trash folder yourself (TASK-31).
+- The tabs now read Tree, Review, Duplicates, Leftovers, Analyze, Runs.
+
+### Tooling
+- `mylib trash PATH...`, `mylib trash` and `mylib trash --clear PATH...` mark,
+  list and unmark files for trash (TASK-31).
+
 ## v1.0.0 — 2026-11-02
 
 First versioned release: MyLibrary as it runs on the home Ubuntu box, organizing
