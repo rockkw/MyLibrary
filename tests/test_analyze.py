@@ -140,7 +140,9 @@ def test_endpoint_is_read_only(client, lib):  # noqa: F811
     assert client.post("/api/analyze").status_code == 405
 
 
-def test_tab_sits_after_tree(client):  # noqa: F811
+def test_analyze_and_runs_tabs_sit_at_the_far_right(client):  # noqa: F811
     page = client.get("/").get_data(as_text=True)
-    assert page.index('data-page="tree"') < page.index('data-page="analyze"') < page.index('data-page="review"')
+    order = ["tree", "review", "dupes", "leftovers", "analyze", "runs"]
+    at = [page.index(f'data-page="{p}"') for p in order]
+    assert at == sorted(at)
     assert 'id="analyze-root"' in page
